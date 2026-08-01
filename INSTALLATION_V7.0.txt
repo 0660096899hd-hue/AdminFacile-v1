@@ -1,0 +1,21 @@
+ADMINFACILE V7.0 — INSTALLATION ET TEST
+
+1. Fermez VS Code et tous les processus Flutter/Dart si flutter clean indique que .dart_tool est utilisé.
+2. Remplacez le contenu de votre projet par celui de ce dossier.
+3. Ouvrez ensuite un nouveau terminal dans le projet.
+
+Commandes :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE
+
+Tests fonctionnels conseillés :
+- Résilier Orange
+- Résilier box Orange
+- Contester une facture EDF
+- Demander un remboursement CPAM
+- Résilier mon assurance auto
+
+Version : 7.0.0+26

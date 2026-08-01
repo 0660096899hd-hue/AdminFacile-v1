@@ -1,0 +1,21 @@
+ADMINFACILE V7.1 — MES DÉMARCHES
+
+Nouveautés :
+- Une démarche est créée automatiquement après la génération d’une lettre.
+- Statuts : Créée, Envoyée, En attente, Relance prévue, Terminée.
+- Notes personnelles et date de relance.
+- Archivage, désarchivage et suppression.
+- Réouverture de la lettre associée avec PDF, e-mail, impression et La Poste.
+- Stockage local hors connexion avec SharedPreferences.
+
+Installation :
+1. Fermez VS Code et les anciens processus Flutter si .dart_tool est verrouillé.
+2. Remplacez le contenu de votre projet par celui de cette archive.
+3. Exécutez :
+   flutter clean
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter run -d RFCW611W5BE
+
+Version : 7.1.0+28

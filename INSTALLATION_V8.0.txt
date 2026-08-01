@@ -1,0 +1,18 @@
+ADMINFACILE V8.0 — ACCUEIL MODERNE
+
+Version : 8.0.0+29
+
+Nouveautés :
+- Nouvelle page d'accueil bleu institutionnel inspirée de la proposition 1.
+- Bandeau principal « Créer une lettre ».
+- Accès rapides à l'assistant, la bibliothèque, Mes démarches, le scanner et les lettres.
+- Aperçu dynamique des trois démarches en cours.
+- Indicateurs réels : relances à venir, démarches terminées et réponses en attente.
+- Toutes les fonctions de la V7.1 sont conservées.
+
+Test :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run

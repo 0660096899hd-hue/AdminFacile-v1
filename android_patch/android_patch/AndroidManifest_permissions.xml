@@ -1,0 +1,3 @@
+<!-- À ajouter juste sous la balise <manifest ...> de android/app/src/main/AndroidManifest.xml -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.INTERNET" />

@@ -1,0 +1,15 @@
+ADMINFACILE V9.0 — THÈMES CLAIR / SOMBRE / AUTOMATIQUE
+
+Nouveautés :
+- Bouton soleil/lune directement sur l'accueil.
+- Choix complet dans Profil > Apparence.
+- Modes Clair, Sombre et Automatique selon le téléphone.
+- Préférence mémorisée localement avec SharedPreferences.
+- Transition animée par MaterialApp lors du changement de thème.
+
+Test :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE

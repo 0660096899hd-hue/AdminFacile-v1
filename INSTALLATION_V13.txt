@@ -1,0 +1,19 @@
+ADMINFACILE V13.0 - ASSISTANT IA PREMIUM LOCAL
+
+Nouveautés :
+- écran Assistant IA Premium
+- bouton Expliquer simplement
+- checklist interactive du plan d’action
+- score de préparation du dossier
+- programmation d’un rappel
+- génération de réponse adaptée
+- ajout à Mes démarches avec rappel
+- copie et partage de l’analyse
+- affichage amélioré des dates, montants et références
+
+Test recommandé :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run

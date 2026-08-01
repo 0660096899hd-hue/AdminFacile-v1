@@ -1,0 +1,11 @@
+ADMINFACILE V6.6
+
+1. Remplacez le contenu de votre projet par celui de ce dossier.
+2. Exécutez :
+   flutter clean
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter run -d RFCW611W5BE
+
+Version : 6.6.0+23

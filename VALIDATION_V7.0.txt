@@ -1,0 +1,16 @@
+VALIDATION EFFECTUÉE DANS L'ENVIRONNEMENT DE CRÉATION
+
+- Parenthèses, crochets et accolades de lib/main.dart : OK
+- Déclaration build dupliquée supprimée : OK
+- assets/letters/library.json lisible : OK
+- 500 modèles présents : OK
+- 500 identifiants uniques : OK
+- Champs obligatoires de chaque modèle : OK
+- Scénario « résilier Orange » : Télécommunications uniquement
+- Scénario « résilier box Orange » : Résiliation box en premier
+- Scénario « contester une facture EDF » : Énergie uniquement
+- Scénario « remboursement CPAM » : CPAM uniquement
+- Scénario « résilier assurance auto » : Assurance uniquement
+
+Flutter n'est pas installé dans l'environnement de création. Les commandes flutter analyze,
+flutter test et flutter run doivent donc être confirmées sur le PC de test Windows.

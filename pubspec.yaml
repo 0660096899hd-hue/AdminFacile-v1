@@ -1,0 +1,36 @@
+name: admin_facile
+description: AdminFacile V13.4 consolidation scanner OCR Gemini et confidentialité.
+publish_to: "none"
+version: 14.0.1+42
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  image_picker: ^1.2.3
+  google_mlkit_text_recognition: ^0.16.0
+  shared_preferences: ^2.5.5
+  file_picker: 10.3.10
+  speech_to_text: ^7.4.0
+  google_mlkit_translation: ^0.14.0
+  flutter_doc_scanner: ^0.0.21
+  path_provider: ^2.1.5
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  share_plus: ^11.1.0
+  url_launcher: ^6.3.2
+  http: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/adminfacile_logo.png
+    - assets/adminfacile_mark.png
+    - assets/letters/library.json

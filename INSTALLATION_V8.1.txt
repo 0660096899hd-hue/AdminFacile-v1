@@ -1,0 +1,19 @@
+ADMINFACILE V8.1 — INTERFACE SOMBRE PREMIUM
+
+Mise à jour réalisée à partir de la V8.0 :
+- accueil sombre conforme à la proposition choisie ;
+- nouveau logo bouclier vectoriel, net sur tous les écrans ;
+- raccourcis responsives sans débordement inférieur ;
+- bandeau principal sombre avec bouton Créer une lettre ;
+- Mes démarches en cours et statistiques réelles conservées ;
+- navigation inférieure harmonisée en bleu nuit ;
+- fonctions V7.1/V8.0 conservées.
+
+Version : 8.1.0+30
+
+Commandes de test :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE

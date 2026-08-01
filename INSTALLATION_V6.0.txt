@@ -1,0 +1,17 @@
+ADMINFACILE V6.0
+
+Nouveautés :
+- moteur intelligent local sans coût API ;
+- reconnaissance d’organismes et de marques (Orange, SFR, Bouygues, Free, EDF, Engie, CAF, CPAM, CARSAT...) ;
+- compréhension des intentions : résiliation, contestation, remboursement, facture, panne, préavis, démission, attestation, échéancier ;
+- ouverture automatique du formulaire correspondant ;
+- conservation des 100 modèles professionnels, recherche, favoris, scanner, PDF et documents locaux.
+
+Installation :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE
+
+L’IA cloud n’est pas activée : aucune clé payante n’est intégrée dans l’application.

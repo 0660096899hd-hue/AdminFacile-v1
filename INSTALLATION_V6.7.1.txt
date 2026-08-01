@@ -1,0 +1,13 @@
+AdminFacile V6.7.1
+
+Corrections :
+- priorité stricte aux organismes (Orange, SFR, EDF, CAF, CPAM, etc.)
+- priorité à l’action demandée (résiliation, contestation, remboursement...)
+- traduction paragraphe par paragraphe pour préserver la structure
+
+Commandes :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE

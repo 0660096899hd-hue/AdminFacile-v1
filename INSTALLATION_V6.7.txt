@@ -1,0 +1,11 @@
+ADMINFACILE V6.7
+
+1. Remplacer les fichiers du projet par ceux de ce dossier.
+2. Exécuter :
+   flutter clean
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter run -d RFCW611W5BE
+
+Nouveautés : assistant distinct de la bibliothèque, 5 recommandations locales, préparation d'e-mail avec PDF joint.

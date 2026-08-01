@@ -1,0 +1,11 @@
+ADMINFACILE V6.5
+
+1. Copiez tout le contenu du dossier dans votre projet.
+2. Exécutez :
+   flutter clean
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter run -d RFCW611W5BE
+
+La nouvelle bibliothèque se trouve dans assets/letters/library.json.

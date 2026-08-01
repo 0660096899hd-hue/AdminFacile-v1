@@ -1,0 +1,19 @@
+ADMINFACILE V12.0 — COFFRE-FORT DOCUMENTAIRE
+
+Nouveautés :
+- Nouveau tableau de bord Mes Documents
+- Recherche OCR et notes
+- Filtres Favoris, Urgents, À traiter et Archivés
+- Tri par date, organisme et priorité
+- Statuts : À traiter, En cours, Terminé, Archivé
+- Priorités : Urgent, Important, Information
+- Modification du titre, organisme, catégorie et notes
+- Aperçu détaillé du texte OCR
+- Conservation automatique des anciens documents V11
+
+Test recommandé :
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d RFCW611W5BE

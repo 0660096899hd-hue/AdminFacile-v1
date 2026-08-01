@@ -1,0 +1,15 @@
+ADMINFACILE V5.1 - INSTALLATION PROPRE
+
+1. Fermez l’application et VS Code.
+2. Copiez tout le contenu du dossier AdminFacile_V5.1 dans votre projet.
+3. Vérifiez que les deux anciens fichiers Firebase ont été remplacés :
+   - lib/account_controller.dart
+   - lib/cloud_documents.dart
+4. Lancez :
+   flutter clean
+   flutter pub get
+   flutter analyze
+   flutter test
+   flutter run -d RFCW611W5BE
+
+Firebase est volontairement désactivé dans cette version.
