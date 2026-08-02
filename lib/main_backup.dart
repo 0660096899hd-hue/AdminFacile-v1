@@ -18,33 +18,67 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'widgets/voice_input_button.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-const String _defaultSupabaseUrl = 'https://pmnjphgaxcmxmhurhucm.supabase.co';
-const String _defaultSupabasePublishableKey =
-    'sb_publishable_XFIAQwu98Rbgn2xFwXkKpw_DJnQrRE_';
+import 'account_controller.dart';
+import 'cloud_documents.dart';
 
-const String _supabaseUrl = String.fromEnvironment(
-  'SUPABASE_URL',
-  defaultValue: _defaultSupabaseUrl,
-);
+class VoiceInputButton extends StatefulWidget {
+  const VoiceInputButton({super.key, required this.controller, this.localeId});
+  final TextEditingController controller;
+  final String? localeId;
 
-const String _supabasePublishableKey = String.fromEnvironment(
-  'SUPABASE_PUBLISHABLE_KEY',
-  defaultValue: _defaultSupabasePublishableKey,
-);
+  @override
+  State<VoiceInputButton> createState() => _VoiceInputButtonState();
+}
 
-bool get _supabaseConfigured =>
-    _supabaseUrl.trim().isNotEmpty && _supabasePublishableKey.trim().isNotEmpty;
+class _VoiceInputButtonState extends State<VoiceInputButton> {
+  final SpeechToText _speech = SpeechToText();
+  bool _listening = false;
 
-bool _supabaseReady = false;
+  Future<void> _toggle() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    final available = await _speech.initialize(
+      onStatus: (status) {
+        if (!mounted) return;
+        if (status == 'done' || status == 'notListening') {
+          setState(() => _listening = false);
+        }
+      },
+      onError: (_) {
+        if (mounted) setState(() => _listening = false);
+      },
+    );
+    if (!available || !mounted) return;
+    setState(() => _listening = true);
+    final initial = widget.controller.text.trim();
+    await _speech.listen(
+      listenOptions: SpeechListenOptions(localeId: widget.localeId),
+      onResult: (result) {
+        final spoken = result.recognizedWords.trim();
+        if (spoken.isEmpty) return;
+        final separator = initial.isEmpty ? '' : ' ';
+        widget.controller.text = '$initial$separator$spoken';
+        widget.controller.selection = TextSelection.collapsed(
+          offset: widget.controller.text.length,
+        );
+      },
+    );
+  }
 
-User? get _currentSupabaseUser =>
-    _supabaseReady ? Supabase.instance.client.auth.currentUser : null;
-
-String procedureCloudPath(String userId, String procedureId) =>
-    '$userId/procedures/$procedureId.pdf';
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: _listening ? 'Arrêter la dictée' : 'Dicter ce texte',
+        onPressed: _toggle,
+        icon: Icon(
+          _listening ? Icons.stop_circle_rounded : Icons.mic_rounded,
+          color: _listening ? Theme.of(context).colorScheme.error : null,
+        ),
+      );
+}
 
 enum ProcedureStatus { created, sent, waiting, reminder, completed }
 
@@ -351,30 +385,18 @@ final ProcedureStore appProcedureStore = ProcedureStore();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  if (_supabaseConfigured) {
-    await Supabase.initialize(
-      url: _supabaseUrl,
-      publishableKey: _supabasePublishableKey,
-    );
-    _supabaseReady = true;
-  }
-
   final settings = AppSettings();
   final documentStore = DocumentStore();
   final procedureStore = appProcedureStore;
-
+  await AccountController.instance.load();
   await settings.load();
   await documentStore.load();
   await procedureStore.load();
-
-  runApp(
-    AdminFacileApp(
-      settings: settings,
-      documentStore: documentStore,
-      procedureStore: procedureStore,
-    ),
-  );
+  runApp(AdminFacileApp(
+    settings: settings,
+    documentStore: documentStore,
+    procedureStore: procedureStore,
+  ));
 }
 
 enum AppThemePreference { system, light, dark }
@@ -523,7 +545,7 @@ class AdminFacileApp extends StatelessWidget {
       animation: settings,
       builder: (_, __) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'AdminFacile V11.0',
+        title: 'AdminFacile V15.3.1',
         themeMode: settings.themePreference.themeMode,
         theme: _buildAdminTheme(Brightness.light, settings.comfortMode),
         darkTheme: _buildAdminTheme(Brightness.dark, settings.comfortMode),
@@ -700,26 +722,6 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int index = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  StreamSubscription<AuthState>? _authSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    if (_supabaseReady) {
-      _authSubscription =
-          Supabase.instance.client.auth.onAuthStateChange.listen(
-        (_) {
-          if (mounted) setState(() {});
-        },
-      );
-    }
-  }
-
-  @override
-  void dispose() {
-    _authSubscription?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1210,11 +1212,12 @@ class HomeScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 30),
                 children: [
                   _DarkHeader(
-                      greeting: settings.greeting,
-                      settings: settings,
-                      openMenu: openMenu,
-                      openSearch: openGlobalSearch,
-                      openProfile: openProfile),
+                    greeting: settings.greeting,
+                    settings: settings,
+                    openMenu: openMenu,
+                    openSearch: openGlobalSearch,
+                    openProfile: openProfile,
+                  ),
                   const SizedBox(height: 20),
                   _DarkHeroCard(onScan: openScanner, onWrite: openAiWriter),
                   const SizedBox(height: 18),
@@ -1279,12 +1282,13 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _DarkHeader extends StatelessWidget {
-  const _DarkHeader(
-      {required this.greeting,
-      required this.settings,
-      required this.openMenu,
-      required this.openSearch,
-      required this.openProfile});
+  const _DarkHeader({
+    required this.greeting,
+    required this.settings,
+    required this.openMenu,
+    required this.openSearch,
+    required this.openProfile,
+  });
   final String greeting;
   final AppSettings settings;
   final VoidCallback openMenu;
@@ -1324,29 +1328,36 @@ class _DarkHeader extends StatelessWidget {
                           fontWeight: FontWeight.bold)))),
         ]),
         const SizedBox(width: 10),
-        Tooltip(
-          message:
-              _currentSupabaseUser == null ? 'Se connecter' : 'Compte connecté',
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              _HeaderCircle(
-                icon: _currentSupabaseUser == null
-                    ? Icons.person_outline_rounded
-                    : Icons.person_rounded,
-                onTap: openProfile,
-              ),
-              if (_currentSupabaseUser != null)
-                const Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: CircleAvatar(
-                    radius: 6,
-                    backgroundColor: Color(0xFF20B98B),
+        AnimatedBuilder(
+          animation: AccountController.instance,
+          builder: (context, _) {
+            final account = AccountController.instance;
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Tooltip(
+                  message: account.isSignedIn
+                      ? 'Compte connecté : ${account.email ?? ''}'
+                      : 'Se connecter',
+                  child: _HeaderCircle(
+                    icon: account.isSignedIn
+                        ? Icons.account_circle_rounded
+                        : Icons.login_rounded,
+                    onTap: openProfile,
                   ),
                 ),
-            ],
-          ),
+                if (account.isSignedIn)
+                  const Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: CircleAvatar(
+                      radius: 6,
+                      backgroundColor: Color(0xFF20D09B),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ]);
 }
@@ -2052,9 +2063,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
             .processImage(InputImage.fromFilePath(pageFile.path));
         final pageText = recognized.text.trim();
         if (pageText.isNotEmpty) {
-          if (buffer.isNotEmpty) {
+          if (buffer.isNotEmpty)
             buffer.writeln('\n--- Page ${pageIndex + 1} ---\n');
-          }
           buffer.write(pageText);
         }
         pageIndex++;
@@ -2113,9 +2123,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       final PdfScanResult? result =
           await FlutterDocScanner().getScannedDocumentAsPdf(page: 10);
       if (result == null) {
-        if (mounted) {
+        if (mounted)
           setState(() => processingStep = DocumentProcessingStep.idle);
-        }
         return;
       }
       final uri = result.pdfUri.trim();
@@ -2129,9 +2138,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
         pdfPath = sourcePath;
       } else {
         final source = File(sourcePath);
-        if (!await source.exists()) {
+        if (!await source.exists())
           throw const FileSystemException('Le PDF créé est introuvable.');
-        }
         await source.copy(target.path);
         pdfPath = target.path;
       }
@@ -2170,9 +2178,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (mounted) {
         setState(() {
           processing = false;
-          if (processingStep != DocumentProcessingStep.completed) {
+          if (processingStep != DocumentProcessingStep.completed)
             processingStep = DocumentProcessingStep.idle;
-          }
         });
       }
     }
@@ -2206,9 +2213,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (result == null || result.files.isEmpty) return;
       final selected = result.files.single;
       final path = selected.path;
-      if (path == null) {
+      if (path == null)
         throw Exception('Le chemin du fichier est inaccessible.');
-      }
       final extension = (selected.extension ?? '').toLowerCase();
       if (extension == 'txt') {
         final content = await File(path).readAsString();
@@ -3291,6 +3297,7 @@ class DocumentInsight {
     this.supplier = '',
     this.billingPeriod = '',
     this.dueDate = '',
+    this.amountDue = '',
     this.amountDetails = const [],
     this.suggestions = const [],
   });
@@ -3310,6 +3317,7 @@ class DocumentInsight {
   final String supplier;
   final String billingPeriod;
   final String dueDate;
+  final String amountDue;
   final List<DocumentAmountItem> amountDetails;
   final List<String> suggestions;
 
@@ -3344,16 +3352,28 @@ Réponds en français, en JSON valide uniquement, sans markdown.
 N'invente aucune date, aucun montant, aucune référence, aucune obligation et aucun droit.
 Quand une information n'est pas présente, utilise une chaîne vide ou une liste vide.
 Le niveau de priorité doit être exactement: Urgent, Important ou Information.
-Adapte l'analyse au document. Pour une facture, sois très concis et associe chaque montant à son libellé exact (consommation, abonnement, HT, TVA, TTC, etc.). Pour un courrier demandant une action, indique les pièces, délais et conséquences utiles. N'ajoute pas de sections inutiles.
+Adapte l'analyse au document. Commence par identifier précisément le type réel du document et son émetteur.
+Pour une facture, renvoie UNIQUEMENT les informations utiles au client :
+- type_document doit être précis : facture_gaz, facture_electricite, facture_eau, facture_telecom, facture_internet, facture_assurance ou facture_autre ;
+- categorie doit être un titre lisible comme « Facture de gaz » ;
+- fournisseur doit être le nom commercial qui émet la facture (exemples : PRIMAGAZ, EDF, ENGIE, Orange, SFR, Veolia) ;
+- montant_a_payer doit être uniquement le total final dû par le client ;
+- date_echeance doit être uniquement la date limite de paiement ;
+- periode_facturation seulement si elle est clairement indiquée.
+N'utilise jamais « Impôts et finances » pour une facture d'énergie ou de télécommunication.
+Ignore totalement le capital social, SIREN/SIRET, adresses, téléphones, coordonnées bancaires, HT, TVA, sous-totaux, acomptes, frais théoriques et mentions légales.
+Pour une facture, mets urgence à « Information », laisse vides les listes montants, detail_montants, références, pièces et avertissements, et limite les actions à : rappel, contestation, question.
+Pour un courrier demandant une action, indique les pièces, délais et conséquences utiles. N'ajoute pas de sections inutiles.
 
 Retourne cet objet JSON :
 {
-  "type_document": "courrier|facture|mise_en_demeure|contrat|autre",
+  "type_document": "courrier|facture_gaz|facture_electricite|facture_eau|facture_telecom|facture_internet|facture_assurance|facture_autre|mise_en_demeure|contrat|autre",
   "organisme": "",
   "categorie": "",
   "fournisseur": "",
   "periode_facturation": "",
   "date_echeance": "",
+  "montant_a_payer": "",
   "urgence": "Information",
   "resume": "",
   "explication_simple": "",
@@ -3462,6 +3482,7 @@ ${sourceText.trim()}
       supplier: value('fournisseur'),
       billingPeriod: value('periode_facturation'),
       dueDate: value('date_echeance'),
+      amountDue: value('montant_a_payer'),
       amountDetails: amountDetails,
       suggestions: strings('suggestions'),
     );
@@ -3739,9 +3760,8 @@ class GeminiLetterWriter {
         ((candidates?.first as Map?)?['content'] as Map?)?['parts'] as List?;
     final text =
         parts?.map((e) => (e as Map?)?['text']?.toString() ?? '').join().trim();
-    if (text == null || text.isEmpty) {
+    if (text == null || text.isEmpty)
       throw const GeminiApiException('Réponse Gemini vide.');
-    }
     return Map<String, dynamic>.from(jsonDecode(text) as Map);
   }
 
@@ -3768,9 +3788,8 @@ TON : $tone
 ''');
     String value(String key) => data[key]?.toString().trim() ?? '';
     final body = value('corps');
-    if (body.isEmpty) {
+    if (body.isEmpty)
       throw const GeminiApiException('Gemini n’a pas généré la lettre.');
-    }
     return GeminiGeneratedLetter(
       title: value('titre').isEmpty
           ? 'Lettre personnalisée Gemini'
@@ -3794,9 +3813,8 @@ LETTRE :
 ${letter.trim()}
 ''');
     final result = data['lettre']?.toString().trim() ?? '';
-    if (result.isEmpty) {
+    if (result.isEmpty)
       throw const GeminiApiException('Gemini n’a pas amélioré la lettre.');
-    }
     return result;
   }
 }
@@ -4012,13 +4030,21 @@ class LocalDocumentAnalyzer {
     final lower = text.toLowerCase();
     String category = 'Courrier administratif';
     const categories = <String, List<String>>{
+      'Facture de gaz': ['primagaz', 'facture de gaz', 'consommation gaz'],
+      'Facture d’électricité': ['facture électricité', 'facture electricite'],
+      'Énergie et télécom': [
+        'électricité',
+        'gaz',
+        'internet',
+        'téléphone',
+        'abonnement'
+      ],
       'Impôts et finances': [
         'impôt',
         'fiscal',
         'trésor public',
         'taxe',
-        'amende',
-        'paiement'
+        'amende'
       ],
       'Prestations sociales': [
         'caf',
@@ -4035,13 +4061,6 @@ class LocalDocumentAnalyzer {
         'salaire',
         'contrat de travail',
         'ressources humaines'
-      ],
-      'Énergie et télécom': [
-        'électricité',
-        'gaz',
-        'internet',
-        'téléphone',
-        'abonnement'
       ],
       'Logement': ['loyer', 'bail', 'propriétaire', 'locataire'],
       'Santé': ['hôpital', 'médecin', 'mutuelle', 'santé', 'soins'],
@@ -4084,17 +4103,21 @@ class LocalDocumentAnalyzer {
 
     String organisation = 'Non identifiée';
     const organisations = [
+      'PRIMAGAZ',
+      'EDF',
+      'ENGIE',
+      'TotalEnergies',
+      'Veolia',
+      'Suez',
+      'Orange',
+      'SFR',
+      'Free',
+      'Bouygues',
       'CAF',
       'CPAM',
       'CARSAT',
       'MSA',
       'URSSAF',
-      'EDF',
-      'ENGIE',
-      'Orange',
-      'SFR',
-      'Free',
-      'Bouygues',
       'France Travail',
       'Assurance Maladie',
       'Trésor public'
@@ -4131,20 +4154,16 @@ class LocalDocumentAnalyzer {
       warnings.add(
           'Conservez une preuve d’envoi et une copie complète de votre réponse.');
     }
-    if (dates.isNotEmpty) {
+    if (dates.isNotEmpty)
       actions.add('Enregistrer l’échéance et programmer un rappel.');
-    }
-    if (actions.isEmpty) {
+    if (actions.isEmpty)
       actions.add(
           'Relire le courrier et demander des précisions avant toute action importante.');
-    }
-    if (documents.isEmpty) {
+    if (documents.isEmpty)
       documents.add('Le courrier original et toute pièce liée au dossier');
-    }
-    if (warnings.isEmpty) {
+    if (warnings.isEmpty)
       warnings.add(
           'Vérifiez toujours les dates, références et coordonnées avant de répondre.');
-    }
 
     final urgentPattern = RegExp(
         r'\b(urgent|mise en demeure|dernier rappel|sous \d+ jours|avant le|au plus tard|suspension|majoration)\b',
@@ -4184,10 +4203,22 @@ class LocalDocumentAnalyzer {
       documentType: RegExp(r'\b(facture|total ttc|tva|hors taxes?)\b',
                   caseSensitive: false)
               .hasMatch(text)
-          ? 'facture'
+          ? (lower.contains('gaz') || lower.contains('primagaz')
+              ? 'facture_gaz'
+              : lower.contains('électricité') || lower.contains('electricite')
+                  ? 'facture_electricite'
+                  : lower.contains('eau')
+                      ? 'facture_eau'
+                      : lower.contains('orange') ||
+                              lower.contains('sfr') ||
+                              lower.contains('bouygues') ||
+                              lower.contains('free')
+                          ? 'facture_telecom'
+                          : 'facture_autre')
           : 'courrier',
       supplier: organisation == 'Non identifiée' ? '' : organisation,
       dueDate: dates.isEmpty ? '' : dates.first,
+      amountDue: amounts.isEmpty ? '' : amounts.last,
       amountDetails: amounts
           .map((amount) =>
               DocumentAmountItem(label: 'Montant repéré', amount: amount))
@@ -4225,6 +4256,12 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
   void initState() {
     super.initState();
     insight = LocalDocumentAnalyzer.analyze(widget.sourceText);
+    if (GeminiDocumentAnalyzer.isConfigured) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _explainWithGemini());
+    } else {
+      aiError =
+          'Gemini n’est pas configuré. Relancez l’application avec votre clé API.';
+    }
   }
 
   Color _priorityColor(BuildContext context) => switch (insight.priority) {
@@ -4330,43 +4367,91 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
     );
   }
 
-  Widget _invoiceOverview(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                const Icon(Icons.receipt_long_rounded),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Text(
-                  insight.category.isEmpty ? 'Facture' : insight.category,
+  Widget _invoiceOverview(BuildContext context) {
+    final supplier =
+        insight.supplier.isNotEmpty ? insight.supplier : insight.organisation;
+    final amount = insight.amountDue.isNotEmpty
+        ? insight.amountDue
+        : (insight.amountDetails.isNotEmpty
+            ? insight.amountDetails.last.amount
+            : (insight.amounts.isNotEmpty
+                ? insight.amounts.last
+                : 'Non détecté'));
+    final rawType = insight.documentType.toLowerCase();
+    final type = switch (rawType) {
+      'facture_gaz' => 'Facture de gaz',
+      'facture_electricite' => 'Facture d’électricité',
+      'facture_eau' => 'Facture d’eau',
+      'facture_telecom' => 'Facture de téléphone',
+      'facture_internet' => 'Facture Internet',
+      'facture_assurance' => 'Facture d’assurance',
+      _ =>
+        insight.category.trim().isEmpty ? 'Facture' : insight.category.trim(),
+    };
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const CircleAvatar(
+                backgroundColor: Color(0xFF123B78),
+                child: Icon(Icons.receipt_long_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  type,
                   style: Theme.of(context)
                       .textTheme
                       .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                )),
-              ]),
-              const SizedBox(height: 10),
-              if (insight.supplier.isNotEmpty ||
-                  insight.organisation != 'Non identifiée')
-                Text(
-                    'Fournisseur : ${insight.supplier.isNotEmpty ? insight.supplier : insight.organisation}'),
-              if (insight.billingPeriod.isNotEmpty)
-                Text('Période : ${insight.billingPeriod}'),
-              if (insight.dueDate.isNotEmpty)
-                Text('Échéance : ${insight.dueDate}'),
-              const Divider(height: 28),
-              _amountBreakdown(),
-              if (insight.summary.isNotEmpty) ...[
-                const Divider(height: 28),
-                Text(insight.summary),
-              ],
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 20),
+            Text('Fournisseur', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Text(
+              supplier == 'Non identifiée' ? 'Non détecté' : supplier,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 18),
+            Text('Montant à payer',
+                style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Text(
+              amount,
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFF20B98B),
+                  ),
+            ),
+            const SizedBox(height: 18),
+            Text('À payer avant',
+                style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Text(
+              insight.dueDate.isEmpty ? 'Date non détectée' : insight.dueDate,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            if (insight.billingPeriod.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text('Période : ${insight.billingPeriod}'),
             ],
-          ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 
   Widget bulletList(List<String> values,
           {IconData icon = Icons.check_circle_outline}) =>
@@ -4530,7 +4615,9 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Assistant IA Premium'),
+          title: Text(insight.isInvoice
+              ? 'Analyse de votre facture'
+              : 'Analyse de votre document'),
           actions: [
             IconButton(
               tooltip: 'Partager l’analyse',
@@ -4543,75 +4630,103 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: _priorityColor(context).withValues(alpha: .13),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: _priorityColor(context).withValues(alpha: .45),
+              if (aiLoading && !aiUsed) ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Row(children: [
+                      const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          'Gemini identifie le document et extrait uniquement les informations utiles…',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                    ]),
                   ),
                 ),
-                child: Row(children: [
-                  CircleAvatar(
-                    backgroundColor: _priorityColor(context),
-                    foregroundColor: Colors.white,
-                    child: Icon(_priorityIcon),
+                const SizedBox(height: 14),
+              ],
+              if (!insight.isInvoice && !aiLoading)
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: _priorityColor(context).withValues(alpha: .13),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _priorityColor(context).withValues(alpha: .45),
+                    ),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
+                  child: Row(children: [
+                    CircleAvatar(
+                      backgroundColor: _priorityColor(context),
+                      foregroundColor: Colors.white,
+                      child: Icon(_priorityIcon),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Priorité : ${insight.priority}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            insight.priority == 'Urgent'
+                                ? 'Une action rapide semble nécessaire.'
+                                : insight.priority == 'Important'
+                                    ? 'Une action ou une échéance a été détectée.'
+                                    : 'Aucune urgence évidente n’a été détectée.',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ]),
+                ),
+              if (!insight.isInvoice && !aiLoading) const SizedBox(height: 10),
+              if (aiUsed) ...[
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Chip(
+                    avatar: Icon(Icons.auto_awesome, size: 18),
+                    label: Text('Analyse réalisée avec Gemini'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              if (aiError != null && !aiLoading) ...[
+                Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          'Priorité : ${insight.priority}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          insight.priority == 'Urgent'
-                              ? 'Une action rapide semble nécessaire.'
-                              : insight.priority == 'Important'
-                                  ? 'Une action ou une échéance a été détectée.'
-                                  : 'Aucune urgence évidente n’a été détectée.',
+                        Text(aiError!),
+                        const SizedBox(height: 8),
+                        FilledButton.icon(
+                          onPressed: _explainWithGemini,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Réessayer avec Gemini'),
                         ),
                       ],
                     ),
                   ),
-                ]),
-              ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Chip(
-                  avatar: Icon(
-                    aiUsed ? Icons.cloud_done_outlined : Icons.phone_android,
-                    size: 18,
-                  ),
-                  label: Text(
-                    aiUsed
-                        ? 'Analyse Gemini Flash-Lite'
-                        : 'Analyse locale provisoire',
-                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              if (insight.isInvoice) _invoiceOverview(context),
-              if (insight.isInvoice) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () => setState(() => showDetails = !showDetails),
-                  icon:
-                      Icon(showDetails ? Icons.expand_less : Icons.expand_more),
-                  label: Text(showDetails
-                      ? 'Masquer les détails'
-                      : 'Voir plus de détails'),
-                ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 14),
               ],
+              if (insight.isInvoice) _invoiceOverview(context),
+              if (insight.isInvoice) const SizedBox(height: 12),
               if (!insight.isInvoice || showDetails)
                 Card(
                   child: Padding(
@@ -4801,6 +4916,41 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                     'Aucune référence clairement détectée.',
                   ),
                 ),
+              if (insight.isInvoice) ...[
+                Text(
+                  'Que souhaitez-vous faire ?',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReplyScreen(
+                        sourceText: widget.sourceText,
+                        insight: insight,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.report_problem_outlined),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    child: Text('Contester cette facture'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  onPressed: _chooseReminder,
+                  icon: const Icon(Icons.alarm_add_outlined),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 13),
+                    child: Text('Créer un rappel de paiement'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               const SizedBox(height: 4),
               FilledButton.tonalIcon(
                 onPressed: () => Navigator.of(context).push(
@@ -4817,73 +4967,75 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   child: Text('Poser une question sur ce document'),
                 ),
               ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ReplyScreen(
-                      sourceText: widget.sourceText,
-                      insight: insight,
+              if (!insight.isInvoice) ...[
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReplyScreen(
+                        sourceText: widget.sourceText,
+                        insight: insight,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_note_rounded),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 15),
+                    child: Text('Générer une réponse adaptée'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  onPressed: _chooseReminder,
+                  icon: const Icon(Icons.alarm_add_outlined),
+                  label: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    child: Text(
+                      reminderDate == null
+                          ? 'Programmer un rappel'
+                          : 'Rappel : ${reminderDate!.day.toString().padLeft(2, '0')}/'
+                              '${reminderDate!.month.toString().padLeft(2, '0')}/'
+                              '${reminderDate!.year}',
                     ),
                   ),
                 ),
-                icon: const Icon(Icons.edit_note_rounded),
-                label: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 15),
-                  child: Text('Générer une réponse adaptée'),
-                ),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                onPressed: _chooseReminder,
-                icon: const Icon(Icons.alarm_add_outlined),
-                label: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  child: Text(
-                    reminderDate == null
-                        ? 'Programmer un rappel'
-                        : 'Rappel : ${reminderDate!.day.toString().padLeft(2, '0')}/'
-                            '${reminderDate!.month.toString().padLeft(2, '0')}/'
-                            '${reminderDate!.year}',
+                const SizedBox(height: 10),
+                FilledButton.tonalIcon(
+                  onPressed: addedToProcedures ? null : _addToProcedures,
+                  icon: Icon(
+                    addedToProcedures ? Icons.check_circle : Icons.add_task,
+                  ),
+                  label: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    child: Text(
+                      addedToProcedures
+                          ? 'Ajouté à Mes démarches'
+                          : 'Ajouter à Mes démarches',
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                onPressed: addedToProcedures ? null : _addToProcedures,
-                icon: Icon(
-                  addedToProcedures ? Icons.check_circle : Icons.add_task,
-                ),
-                label: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  child: Text(
-                    addedToProcedures
-                        ? 'Ajouté à Mes démarches'
-                        : 'Ajouter à Mes démarches',
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _copyAnalysis,
+                      icon: const Icon(Icons.copy_all_outlined),
+                      label: const Text('Copier'),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _copyAnalysis,
-                    icon: const Icon(Icons.copy_all_outlined),
-                    label: const Text('Copier'),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _shareAnalysis,
+                      icon: const Icon(Icons.share_outlined),
+                      label: const Text('Partager'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _shareAnalysis,
-                    icon: const Icon(Icons.share_outlined),
-                    label: const Text('Partager'),
-                  ),
-                ),
-              ]),
+                ]),
+              ],
               const SizedBox(height: 14),
               Text(
-                'Analyse locale indicative : vérifiez toujours les dates, '
+                'Analyse indicative : vérifiez toujours les dates, '
                 'montants, références et obligations avant d’envoyer une réponse.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
@@ -5412,10 +5564,9 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
     final ok = await speech.initialize(onStatus: (status) {
       if (mounted) setState(() => listening = status == 'listening');
     }, onError: (error) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Microphone : ${error.errorMsg}')));
-      }
     });
     if (ok) {
       for (final locale in await speech.locales()) {
@@ -5663,9 +5814,8 @@ class _AssistantSuggestionsScreenState
 
         if (title.contains(query)) score += 60;
         if (subject.contains(query)) score += 40;
-        if (title.contains('standard') || keywords.contains('standard')) {
+        if (title.contains('standard') || keywords.contains('standard'))
           score += 8;
-        }
 
         if (score > 0) {
           scored.add(AssistantSuggestion(record: record, score: score));
@@ -7519,15 +7669,13 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
           content:
               Text('Lettre améliorée avec Gemini. Relisez-la avant l’envoi.')));
     } on GeminiConfigurationException catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.message)));
-      }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Amélioration impossible : $e')));
-      }
     } finally {
       if (mounted) setState(() => improving = false);
     }
@@ -7712,7 +7860,6 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
 
 class ProceduresScreen extends StatefulWidget {
   const ProceduresScreen({super.key, required this.store});
-
   final ProcedureStore store;
 
   @override
@@ -7723,154 +7870,13 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
   bool showArchived = false;
   String query = '';
 
-  final Set<String> _uploadingProcedureIds = <String>{};
-  final Set<String> _syncedProcedureIds = <String>{};
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCloudState();
-  }
-
-  String _date(DateTime value) => '${value.day.toString().padLeft(2, '0')}/'
-      '${value.month.toString().padLeft(2, '0')}/'
-      '${value.year}';
-
-  Future<void> _loadCloudState() async {
-    if (!_supabaseReady) return;
-
-    final user = _currentSupabaseUser;
-    if (user == null) return;
-
-    try {
-      final files = await Supabase.instance.client.storage
-          .from('admin-documents')
-          .list(path: '${user.id}/procedures');
-
-      if (!mounted) return;
-
-      setState(() {
-        _syncedProcedureIds
-          ..clear()
-          ..addAll(
-            files
-                .where((file) => file.name.toLowerCase().endsWith('.pdf'))
-                .map((file) => file.name.replaceAll('.pdf', '')),
-          );
-      });
-    } catch (error) {
-      debugPrint('Lecture des démarches cloud impossible : $error');
-    }
-  }
-
-  Future<void> _uploadProcedure(AdministrativeProcedure item) async {
-    if (!_supabaseReady) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Supabase n’est pas configuré dans cette version.'),
-        ),
-      );
-      return;
-    }
-
-    final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
-
-    if (user == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Connectez-vous dans Profil avant de sauvegarder cette démarche.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (_uploadingProcedureIds.contains(item.id)) return;
-
-    setState(() => _uploadingProcedureIds.add(item.id));
-
-    try {
-      final pdf = pw.Document();
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(38),
-          build: (_) => [
-            pw.Text(
-              item.title,
-              style: pw.TextStyle(
-                fontSize: 20,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Text(
-              item.organisation.isEmpty ? item.category : item.organisation,
-            ),
-            pw.SizedBox(height: 18),
-            pw.Text(item.letter),
-            if (item.notes.trim().isNotEmpty) ...[
-              pw.SizedBox(height: 20),
-              pw.Divider(),
-              pw.Text(
-                'Notes personnelles',
-                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-              ),
-              pw.SizedBox(height: 6),
-              pw.Text(item.notes.trim()),
-            ],
-          ],
-        ),
-      );
-
-      final bytes = await pdf.save();
-      final cloudPath = procedureCloudPath(user.id, item.id);
-
-      await client.storage.from('admin-documents').uploadBinary(
-            cloudPath,
-            bytes,
-            fileOptions: const FileOptions(
-              contentType: 'application/pdf',
-              upsert: true,
-            ),
-          );
-
-      if (!mounted) return;
-
-      setState(() => _syncedProcedureIds.add(item.id));
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '« ${item.title} » est sauvegardée dans votre espace sécurisé.',
-          ),
-        ),
-      );
-    } catch (error, stackTrace) {
-      debugPrint('Envoi Supabase impossible : $error\n$stackTrace');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sauvegarde impossible : $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _uploadingProcedureIds.remove(item.id));
-      }
-    }
-  }
+  String _date(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}/${value.month.toString().padLeft(2, '0')}/${value.year}';
 
   Future<void> _edit(AdministrativeProcedure item) async {
     var selectedStatus = item.status;
     var reminderDate = item.reminderDate;
     final notes = TextEditingController(text: item.notes);
-
     final result = await showDialog<AdministrativeProcedure>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -7885,17 +7891,14 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                   initialValue: selectedStatus,
                   decoration: const InputDecoration(labelText: 'Statut'),
                   items: ProcedureStatus.values
-                      .map(
-                        (status) => DropdownMenuItem(
-                          value: status,
-                          child: Text(status.label),
-                        ),
-                      )
+                      .map((status) => DropdownMenuItem(
+                            value: status,
+                            child: Text(status.label),
+                          ))
                       .toList(),
                   onChanged: (value) {
-                    if (value != null) {
+                    if (value != null)
                       setDialogState(() => selectedStatus = value);
-                    }
                   },
                 ),
                 const SizedBox(height: 14),
@@ -7914,16 +7917,15 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.event_repeat),
                   title: const Text('Date de relance'),
-                  subtitle: Text(
-                    reminderDate == null ? 'Aucune date' : _date(reminderDate!),
-                  ),
+                  subtitle: Text(reminderDate == null
+                      ? 'Aucune date'
+                      : _date(reminderDate!)),
                   trailing: reminderDate == null
                       ? null
                       : IconButton(
                           tooltip: 'Supprimer la date',
-                          onPressed: () {
-                            setDialogState(() => reminderDate = null);
-                          },
+                          onPressed: () =>
+                              setDialogState(() => reminderDate = null),
                           icon: const Icon(Icons.clear),
                         ),
                   onTap: () async {
@@ -7932,14 +7934,10 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                       initialDate: reminderDate ??
                           DateTime.now().add(const Duration(days: 14)),
                       firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(
-                        const Duration(days: 3650),
-                      ),
+                      lastDate: DateTime.now().add(const Duration(days: 3650)),
                     );
-
-                    if (picked != null) {
+                    if (picked != null)
                       setDialogState(() => reminderDate = picked);
-                    }
                   },
                 ),
               ],
@@ -7947,9 +7945,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Annuler'),
-            ),
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Annuler')),
             FilledButton(
               onPressed: () => Navigator.pop(
                 dialogContext,
@@ -7966,12 +7963,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
         ),
       ),
     );
-
     notes.dispose();
-
-    if (result != null) {
-      await widget.store.update(result);
-    }
+    if (result != null) await widget.store.update(result);
   }
 
   Future<void> _confirmDelete(AdministrativeProcedure item) async {
@@ -7982,49 +7975,31 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
         content: Text('« ${item.title} » sera supprimée définitivement.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Annuler'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annuler')),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Supprimer'),
-          ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Supprimer')),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await widget.store.remove(item.id);
-    }
+    if (confirmed == true) await widget.store.remove(item.id);
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Mes démarches'),
-          actions: [
-            IconButton(
-              tooltip: 'Actualiser le cloud',
-              onPressed: _loadCloudState,
-              icon: const Icon(Icons.cloud_sync_outlined),
-            ),
-          ],
-        ),
+        appBar: AppBar(title: const Text('Mes démarches')),
         body: AnimatedBuilder(
           animation: widget.store,
           builder: (context, _) {
             final normalized = query.trim().toLowerCase();
-
             final items = widget.store.items.where((item) {
               if (item.archived != showArchived) return false;
               if (normalized.isEmpty) return true;
-
-              return '${item.title} ${item.organisation} '
-                      '${item.category} ${item.notes} ${item.status.label}'
+              return '${item.title} ${item.organisation} ${item.category} ${item.notes} ${item.status.label}'
                   .toLowerCase()
                   .contains(normalized);
             }).toList();
-
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -8039,20 +8014,17 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                 SegmentedButton<bool>(
                   segments: const [
                     ButtonSegment(
-                      value: false,
-                      label: Text('En cours'),
-                      icon: Icon(Icons.folder_open),
-                    ),
+                        value: false,
+                        label: Text('En cours'),
+                        icon: Icon(Icons.folder_open)),
                     ButtonSegment(
-                      value: true,
-                      label: Text('Archivées'),
-                      icon: Icon(Icons.archive_outlined),
-                    ),
+                        value: true,
+                        label: Text('Archivées'),
+                        icon: Icon(Icons.archive_outlined)),
                   ],
                   selected: {showArchived},
-                  onSelectionChanged: (value) {
-                    setState(() => showArchived = value.first);
-                  },
+                  onSelectionChanged: (value) =>
+                      setState(() => showArchived = value.first),
                 ),
                 const SizedBox(height: 16),
                 if (items.isEmpty)
@@ -8066,8 +8038,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                           Text('Aucune démarche dans cette section.'),
                           SizedBox(height: 6),
                           Text(
-                            'Une démarche est créée automatiquement lorsque vous générez une lettre.',
-                          ),
+                              'Une démarche est créée automatiquement lorsque vous générez une lettre.'),
                         ],
                       ),
                     ),
@@ -8088,56 +8059,39 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      item.title,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium,
-                                    ),
+                                    Text(item.title,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium),
                                     const SizedBox(height: 3),
-                                    Text(
-                                      item.organisation.isEmpty
-                                          ? item.category
-                                          : item.organisation,
-                                    ),
+                                    Text(item.organisation.isEmpty
+                                        ? item.category
+                                        : item.organisation),
                                   ],
                                 ),
                               ),
                               PopupMenuButton<String>(
                                 onSelected: (value) async {
-                                  if (value == 'edit') {
-                                    await _edit(item);
-                                  }
-
+                                  if (value == 'edit') await _edit(item);
                                   if (value == 'archive') {
-                                    await widget.store.update(
-                                      item.copyWith(
-                                        archived: !item.archived,
-                                      ),
-                                    );
+                                    await widget.store.update(item.copyWith(
+                                        archived: !item.archived));
                                   }
-
-                                  if (value == 'delete') {
+                                  if (value == 'delete')
                                     await _confirmDelete(item);
-                                  }
                                 },
                                 itemBuilder: (_) => [
                                   const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Modifier'),
-                                  ),
+                                      value: 'edit', child: Text('Modifier')),
                                   PopupMenuItem(
                                     value: 'archive',
-                                    child: Text(
-                                      item.archived
-                                          ? 'Désarchiver'
-                                          : 'Archiver',
-                                    ),
+                                    child: Text(item.archived
+                                        ? 'Désarchiver'
+                                        : 'Archiver'),
                                   ),
                                   const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Supprimer'),
-                                  ),
+                                      value: 'delete',
+                                      child: Text('Supprimer')),
                                 ],
                               ),
                             ],
@@ -8148,101 +8102,43 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                             runSpacing: 8,
                             children: [
                               Chip(
-                                avatar: Icon(item.status.icon, size: 18),
-                                label: Text(item.status.label),
-                              ),
+                                  avatar: Icon(item.status.icon, size: 18),
+                                  label: Text(item.status.label)),
                               Chip(
-                                avatar: const Icon(
-                                  Icons.calendar_today,
-                                  size: 17,
-                                ),
-                                label: Text(
-                                  'Créée le ${_date(item.createdAt)}',
-                                ),
-                              ),
+                                  avatar: const Icon(Icons.calendar_today,
+                                      size: 17),
+                                  label: Text(
+                                      'Créée le ${_date(item.createdAt)}')),
                               if (item.reminderDate != null)
                                 Chip(
-                                  avatar: const Icon(
-                                    Icons.notifications_active,
-                                    size: 17,
-                                  ),
-                                  label: Text(
-                                    'Relance le ${_date(item.reminderDate!)}',
-                                  ),
-                                ),
-                              Chip(
-                                avatar: Icon(
-                                  _syncedProcedureIds.contains(item.id)
-                                      ? Icons.cloud_done_rounded
-                                      : Icons.cloud_off_outlined,
-                                  size: 17,
-                                  color: _syncedProcedureIds.contains(item.id)
-                                      ? Colors.green
-                                      : null,
-                                ),
-                                label: Text(
-                                  _syncedProcedureIds.contains(item.id)
-                                      ? 'Synchronisée'
-                                      : 'Non synchronisée',
-                                ),
-                              ),
+                                    avatar: const Icon(
+                                        Icons.notifications_active,
+                                        size: 17),
+                                    label: Text(
+                                        'Relance le ${_date(item.reminderDate!)}')),
                             ],
                           ),
                           if (item.notes.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            Text(
-                              item.notes,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            Text(item.notes,
+                                maxLines: 3, overflow: TextOverflow.ellipsis),
                           ],
                           const SizedBox(height: 10),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => LetterPreviewScreen(
-                                          letter: item.letter,
-                                          defaultSubject: item.title,
-                                        ),
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => LetterPreviewScreen(
+                                        letter: item.letter,
+                                        defaultSubject: item.title,
                                       ),
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.description_outlined,
+                                    ),
                                   ),
+                                  icon: const Icon(Icons.description_outlined),
                                   label: const Text('Ouvrir la lettre'),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton.filledTonal(
-                                tooltip: _syncedProcedureIds.contains(item.id)
-                                    ? 'Déjà sauvegardée dans le cloud'
-                                    : 'Sauvegarder dans mon espace sécurisé',
-                                onPressed:
-                                    _uploadingProcedureIds.contains(item.id)
-                                        ? null
-                                        : () => _uploadProcedure(item),
-                                icon: _uploadingProcedureIds.contains(item.id)
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Icon(
-                                        _syncedProcedureIds.contains(item.id)
-                                            ? Icons.cloud_done_rounded
-                                            : Icons.cloud_upload_outlined,
-                                        color: _syncedProcedureIds
-                                                .contains(item.id)
-                                            ? Colors.green
-                                            : null,
-                                      ),
                               ),
                               const SizedBox(width: 8),
                               IconButton.filledTonal(
@@ -8347,6 +8243,80 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await Printing.layoutPdf(
         onLayout: (_) async => File(doc.filePath!).readAsBytes(),
         name: doc.title);
+  }
+
+  Future<String> _prepareCloudFile(SavedDocument doc) async {
+    final existingPath = doc.filePath;
+    if (existingPath != null && await File(existingPath).exists()) {
+      return existingPath;
+    }
+
+    final pdf = pw.Document();
+    final content = doc.extractedText.trim().isNotEmpty
+        ? doc.extractedText.trim()
+        : doc.notes.trim().isNotEmpty
+            ? doc.notes.trim()
+            : 'Document administratif enregistré dans AdminFacile.';
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (_) => [
+          pw.Text(
+            doc.title,
+            style: pw.TextStyle(
+              fontSize: 20,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text('Organisme : ${doc.organisation}'),
+          pw.Text('Catégorie : ${doc.category}'),
+          pw.SizedBox(height: 18),
+          pw.Text(content),
+        ],
+      ),
+    );
+    final directory = await getTemporaryDirectory();
+    final safeTitle = doc.title
+        .replaceAll(RegExp(r'[^a-zA-Z0-9À-ÿ._-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    final target = File(
+      '${directory.path}/${safeTitle.isEmpty ? 'document' : safeTitle}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
+    await target.writeAsBytes(await pdf.save(), flush: true);
+    return target.path;
+  }
+
+  Future<void> _uploadToCloud(SavedDocument doc) async {
+    if (!AccountController.instance.isSignedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Connectez-vous avec le bouton en haut à droite ou dans Profil.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final uploadPath = await _prepareCloudFile(doc);
+      await CloudDocumentsController.instance.uploadFile(
+        localPath: uploadPath,
+        displayName: doc.title,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Document enregistré dans votre espace sécurisé.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Envoi impossible : $error')),
+      );
+    }
   }
 
   Future<void> _editDocument(SavedDocument doc) async {
@@ -8535,6 +8505,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const SizedBox(height: 6),
                 const Text(
                     'Classez, retrouvez et suivez tous vos documents administratifs au même endroit.'),
+                const SizedBox(height: 14),
+                _CloudSummaryCard(
+                  onOpen: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const CloudSpaceScreen()),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 Row(children: [
                   Expanded(
@@ -8754,6 +8730,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           icon: const Icon(
                                               Icons.visibility_outlined),
                                           label: const Text('Aperçu')),
+                                    AnimatedBuilder(
+                                      animation:
+                                          CloudDocumentsController.instance,
+                                      builder: (context, _) =>
+                                          IconButton.filledTonal(
+                                        tooltip:
+                                            'Enregistrer dans mon espace sécurisé',
+                                        onPressed: CloudDocumentsController
+                                                .instance.busy
+                                            ? null
+                                            : () => _uploadToCloud(doc),
+                                        icon: const Icon(
+                                            Icons.cloud_upload_outlined),
+                                      ),
+                                    ),
                                     if (doc.filePath != null)
                                       IconButton.filledTonal(
                                           tooltip: 'Partager',
@@ -8808,9 +8799,7 @@ class _DocumentStatCard extends StatelessWidget {
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, required this.settings});
-
   final AppSettings settings;
-
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
@@ -8818,17 +8807,9 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final Map<String, TextEditingController> fields;
 
-  final TextEditingController _accountEmailController = TextEditingController();
-  final TextEditingController _accountPasswordController =
-      TextEditingController();
-
-  bool _authBusy = false;
-  bool _createAccountMode = false;
-
   @override
   void initState() {
     super.initState();
-
     fields = {
       'firstName': TextEditingController(text: widget.settings.firstName),
       'lastName': TextEditingController(text: widget.settings.lastName),
@@ -8838,9 +8819,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'phone': TextEditingController(text: widget.settings.phone),
       'email': TextEditingController(text: widget.settings.email),
     };
-
-    _accountEmailController.text =
-        _currentSupabaseUser?.email ?? widget.settings.email;
   }
 
   @override
@@ -8848,385 +8826,487 @@ class _ProfileScreenState extends State<ProfileScreen> {
     for (final controller in fields.values) {
       controller.dispose();
     }
-
-    _accountEmailController.dispose();
-    _accountPasswordController.dispose();
-
     super.dispose();
   }
 
   Future<void> save() async {
-    await widget.settings.saveProfile(
-      fields.map((key, value) => MapEntry(key, value.text)),
-    );
-
+    await widget.settings
+        .saveProfile(fields.map((key, value) => MapEntry(key, value.text)));
     if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profil enregistré')),
-    );
-  }
-
-  Future<void> _submitAccount() async {
-    if (!_supabaseReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Supabase n’est pas configuré dans cette version.'),
-        ),
-      );
-      return;
-    }
-
-    final email = _accountEmailController.text.trim();
-    final password = _accountPasswordController.text;
-
-    if (email.isEmpty || password.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Saisissez une adresse e-mail et un mot de passe de 6 caractères minimum.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _authBusy = true);
-
-    try {
-      if (_createAccountMode) {
-        await Supabase.instance.client.auth.signUp(
-          email: email,
-          password: password,
-        );
-      } else {
-        await Supabase.instance.client.auth.signInWithPassword(
-          email: email,
-          password: password,
-        );
-      }
-
-      if (!mounted) return;
-
-      setState(() {});
-      _accountPasswordController.clear();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _createAccountMode
-                ? 'Compte créé. Vérifiez votre e-mail si une confirmation est demandée.'
-                : 'Connexion réussie.',
-          ),
-        ),
-      );
-    } on AuthException catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connexion impossible : $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _authBusy = false);
-      }
-    }
-  }
-
-  Future<void> _signOut() async {
-    if (!_supabaseReady) return;
-    await Supabase.instance.client.auth.signOut();
-
-    if (!mounted) return;
-
-    setState(() {});
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Vous êtes déconnecté.')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Profil enregistré')));
   }
 
   @override
-  Widget build(BuildContext context) {
-    final user = _currentSupabaseUser;
-
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(
-            'Mon profil',
+  Widget build(BuildContext context) => SafeArea(
+          child: ListView(padding: const EdgeInsets.all(20), children: [
+        Text('Mon profil',
             style: Theme.of(context)
                 .textTheme
                 .headlineMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Ces informations seront automatiquement reprises dans vos lettres.',
-          ),
-          const SizedBox(height: 18),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        user == null
-                            ? Icons.cloud_off_outlined
-                            : Icons.cloud_done_rounded,
-                        color: user == null
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.green,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          user == null
-                              ? 'Compte et espace sécurisé'
-                              : 'Compte connecté',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  if (user != null) ...[
-                    Text(user.email ?? 'Compte connecté'),
-                    const SizedBox(height: 12),
-                    FilledButton.tonalIcon(
-                      onPressed: _signOut,
-                      icon: const Icon(Icons.logout_rounded),
-                      label: const Text('Se déconnecter'),
-                    ),
-                  ] else ...[
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          label: Text('Connexion'),
-                          icon: Icon(Icons.login_rounded),
-                        ),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('Créer un compte'),
-                          icon: Icon(Icons.person_add_alt_1_rounded),
-                        ),
-                      ],
-                      selected: {_createAccountMode},
-                      onSelectionChanged: (selection) {
-                        setState(() {
-                          _createAccountMode = selection.first;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _accountEmailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'Adresse e-mail du compte',
-                        prefixIcon: Icon(Icons.email_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _accountPasswordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Mot de passe',
-                        prefixIcon: Icon(Icons.lock_outline_rounded),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _authBusy ? null : _submitAccount,
-                      icon: _authBusy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : Icon(
-                              _createAccountMode
-                                  ? Icons.person_add_alt_1_rounded
-                                  : Icons.login_rounded,
-                            ),
-                      label: Text(
-                        _createAccountMode
-                            ? 'Créer mon compte'
-                            : 'Se connecter',
-                      ),
-                    ),
-                  ],
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text(
+            'Ces informations seront automatiquement reprises dans vos lettres.'),
+        const SizedBox(height: 18),
+        const _AccountStorageCard(),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.palette_outlined,
+                    color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                const Text('Apparence',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))
+              ]),
+              const SizedBox(height: 8),
+              const Text('Choisissez le thème de l’application.'),
+              const SizedBox(height: 14),
+              SegmentedButton<AppThemePreference>(
+                segments: const [
+                  ButtonSegment(
+                      value: AppThemePreference.system,
+                      icon: Icon(Icons.phone_android),
+                      label: Text('Auto')),
+                  ButtonSegment(
+                      value: AppThemePreference.light,
+                      icon: Icon(Icons.light_mode_outlined),
+                      label: Text('Clair')),
+                  ButtonSegment(
+                      value: AppThemePreference.dark,
+                      icon: Icon(Icons.dark_mode_outlined),
+                      label: Text('Sombre')),
                 ],
+                selected: {widget.settings.themePreference},
+                showSelectedIcon: false,
+                onSelectionChanged: (selection) =>
+                    widget.settings.setThemePreference(selection.first),
               ),
-            ),
+            ]),
           ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.palette_outlined,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      const Text(
-                        'Apparence',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Choisissez le thème de l’application.'),
-                  const SizedBox(height: 14),
-                  SegmentedButton<AppThemePreference>(
-                    segments: const [
-                      ButtonSegment(
-                        value: AppThemePreference.system,
-                        icon: Icon(Icons.phone_android),
-                        label: Text('Auto'),
-                      ),
-                      ButtonSegment(
-                        value: AppThemePreference.light,
-                        icon: Icon(Icons.light_mode_outlined),
-                        label: Text('Clair'),
-                      ),
-                      ButtonSegment(
-                        value: AppThemePreference.dark,
-                        icon: Icon(Icons.dark_mode_outlined),
-                        label: Text('Sombre'),
-                      ),
-                    ],
-                    selected: {widget.settings.themePreference},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (selection) {
-                      widget.settings.setThemePreference(selection.first);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            value: widget.settings.comfortMode,
-            onChanged: widget.settings.setComfortMode,
-            secondary: const Icon(Icons.text_increase),
-            title: const Text('Mode confort'),
-            subtitle: const Text(
-              'Texte plus grand et navigation plus lisible',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+        ),
+        const SizedBox(height: 12),
+        SwitchListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          value: widget.settings.comfortMode,
+          onChanged: widget.settings.setComfortMode,
+          secondary: const Icon(Icons.text_increase),
+          title: const Text('Mode confort'),
+          subtitle: const Text('Texte plus grand et navigation plus lisible'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
             controller: fields['firstName'],
             decoration: InputDecoration(
-              labelText: 'Prénom',
-              suffixIcon: VoiceInputButton(
-                controller: fields['firstName']!,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+                labelText: 'Prénom',
+                suffixIcon:
+                    VoiceInputButton(controller: fields['firstName']!))),
+        const SizedBox(height: 12),
+        TextField(
             controller: fields['lastName'],
             decoration: InputDecoration(
-              labelText: 'Nom',
-              suffixIcon: VoiceInputButton(
-                controller: fields['lastName']!,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+                labelText: 'Nom',
+                suffixIcon: VoiceInputButton(controller: fields['lastName']!))),
+        const SizedBox(height: 12),
+        TextField(
             controller: fields['address'],
             decoration: InputDecoration(
-              labelText: 'Adresse',
-              suffixIcon: VoiceInputButton(
-                controller: fields['address']!,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
+                labelText: 'Adresse',
+                suffixIcon: VoiceInputButton(controller: fields['address']!))),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+              flex: 2,
+              child: TextField(
                   controller: fields['postalCode'],
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Code postal',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: TextField(
+                  decoration: const InputDecoration(labelText: 'Code postal'))),
+          const SizedBox(width: 12),
+          Expanded(
+              flex: 3,
+              child: TextField(
                   controller: fields['city'],
                   decoration: InputDecoration(
-                    labelText: 'Ville',
-                    suffixIcon: VoiceInputButton(
-                      controller: fields['city']!,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
+                      labelText: 'Ville',
+                      suffixIcon:
+                          VoiceInputButton(controller: fields['city']!)))),
+        ]),
+        const SizedBox(height: 12),
+        TextField(
             controller: fields['phone'],
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(labelText: 'Téléphone'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
+            decoration: const InputDecoration(labelText: 'Téléphone')),
+        const SizedBox(height: 12),
+        TextField(
             controller: fields['email'],
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: 'E-mail'),
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
+            decoration: const InputDecoration(labelText: 'E-mail')),
+        const SizedBox(height: 18),
+        FilledButton.icon(
             onPressed: save,
             icon: const Icon(Icons.save_outlined),
             label: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 14),
-              child: Text('Enregistrer mon profil'),
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text('Enregistrer mon profil'))),
+        const SizedBox(height: 20),
+        const PrivacyCard(),
+      ]));
+}
+
+class _CloudSummaryCard extends StatelessWidget {
+  const _CloudSummaryCard({required this.onOpen});
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: AccountController.instance,
+        builder: (context, _) {
+          final account = AccountController.instance;
+          return Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                child: Icon(
+                  account.isSignedIn
+                      ? Icons.cloud_done_outlined
+                      : Icons.cloud_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              title: Text(account.isSignedIn
+                  ? 'Mon espace sécurisé'
+                  : 'Stockage utilisateur'),
+              subtitle: Text(
+                account.isSignedIn
+                    ? 'Connecté avec ${account.email}'
+                    : 'Connectez-vous pour sauvegarder vos PDF dans le cloud.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: onOpen,
             ),
+          );
+        },
+      );
+}
+
+class _AccountStorageCard extends StatelessWidget {
+  const _AccountStorageCard();
+
+  Future<void> _openAuthDialog(BuildContext context,
+      {required bool create}) async {
+    final email = TextEditingController();
+    final password = TextEditingController();
+    bool obscure = true;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(create ? 'Créer mon compte' : 'Me connecter'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: email,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                    labelText: 'Adresse e-mail',
+                    prefixIcon: Icon(Icons.email_outlined)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: password,
+                obscureText: obscure,
+                decoration: InputDecoration(
+                  labelText: 'Mot de passe',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                    icon: Icon(obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined),
+                  ),
+                ),
+              ),
+              if (create) ...[
+                const SizedBox(height: 10),
+                const Text(
+                    'Le mot de passe doit contenir au moins 6 caractères.'),
+              ],
+            ]),
           ),
-          const SizedBox(height: 20),
-          const PrivacyCard(),
-        ],
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(create ? 'Créer' : 'Connexion')),
+          ],
+        ),
       ),
     );
+    if (accepted != true) {
+      email.dispose();
+      password.dispose();
+      return;
+    }
+    try {
+      if (create) {
+        await AccountController.instance
+            .createAccount(email: email.text, password: password.text);
+      } else {
+        await AccountController.instance
+            .signIn(email: email.text, password: password.text);
+      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                create ? 'Compte créé et connecté.' : 'Connexion réussie.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$error')));
+    } finally {
+      email.dispose();
+      password.dispose();
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: AccountController.instance,
+        builder: (context, _) {
+          final account = AccountController.instance;
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(Icons.cloud_outlined,
+                          color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                          child: Text('Mon espace sécurisé',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.w800))),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(
+                      !account.isConfigured
+                          ? 'Supabase doit être configuré pour activer les comptes et le stockage.'
+                          : account.isSignedIn
+                              ? 'Connecté avec ${account.email}. Vos documents cloud sont privés.'
+                              : 'Créez un compte ou connectez-vous pour retrouver vos documents sur un autre téléphone.',
+                    ),
+                    const SizedBox(height: 14),
+                    if (account.isSignedIn) ...[
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const CloudSpaceScreen())),
+                        icon: const Icon(Icons.folder_outlined),
+                        label: const Text('Ouvrir mon espace sécurisé'),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: account.busy
+                            ? null
+                            : AccountController.instance.signOut,
+                        icon: const Icon(Icons.logout),
+                        label: const Text('Se déconnecter'),
+                      ),
+                    ] else ...[
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        FilledButton.icon(
+                          onPressed: !account.isConfigured || account.busy
+                              ? null
+                              : () => _openAuthDialog(context, create: false),
+                          icon: const Icon(Icons.login),
+                          label: const Text('Se connecter'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: !account.isConfigured || account.busy
+                              ? null
+                              : () => _openAuthDialog(context, create: true),
+                          icon: const Icon(Icons.person_add_alt_1),
+                          label: const Text('Créer un compte'),
+                        ),
+                      ]),
+                    ],
+                  ]),
+            ),
+          );
+        },
+      );
+}
+
+class CloudSpaceScreen extends StatefulWidget {
+  const CloudSpaceScreen({super.key});
+
+  @override
+  State<CloudSpaceScreen> createState() => _CloudSpaceScreenState();
+}
+
+class _CloudSpaceScreenState extends State<CloudSpaceScreen> {
+  @override
+  void initState() {
+    super.initState();
+    if (AccountController.instance.isSignedIn) {
+      Future<void>.microtask(() async {
+        try {
+          await CloudDocumentsController.instance.refresh();
+        } catch (_) {}
+      });
+    }
+  }
+
+  String _size(int bytes) {
+    if (bytes < 1024) return '$bytes o';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} Ko';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} Mo';
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          title: const Text('Mon espace sécurisé'),
+          actions: [
+            IconButton(
+              tooltip: 'Actualiser',
+              onPressed: AccountController.instance.isSignedIn
+                  ? () async {
+                      try {
+                        await CloudDocumentsController.instance.refresh();
+                      } catch (error) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(content: Text('$error')));
+                      }
+                    }
+                  : null,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: AnimatedBuilder(
+          animation: Listenable.merge(
+              [AccountController.instance, CloudDocumentsController.instance]),
+          builder: (context, _) {
+            final account = AccountController.instance;
+            final cloud = CloudDocumentsController.instance;
+            if (!cloud.isConfigured) {
+              return const _CloudEmptyState(
+                icon: Icons.settings_outlined,
+                title: 'Supabase à configurer',
+                subtitle:
+                    'La connexion au stockage sécurisé n’est pas disponible. Vérifiez votre connexion Internet.',
+              );
+            }
+            if (!account.isSignedIn) {
+              return const _CloudEmptyState(
+                icon: Icons.lock_outline,
+                title: 'Connexion nécessaire',
+                subtitle:
+                    'Ouvrez Profil pour créer un compte ou vous connecter.',
+              );
+            }
+            if (cloud.busy && cloud.documents.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (cloud.documents.isEmpty) {
+              return const _CloudEmptyState(
+                icon: Icons.cloud_upload_outlined,
+                title: 'Votre espace est vide',
+                subtitle:
+                    'Dans Mes documents, appuyez sur l’icône cloud pour sauvegarder un PDF.',
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: cloud.documents.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final document = cloud.documents[index];
+                return Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                        child: Icon(Icons.picture_as_pdf_outlined)),
+                    title: Text(document.name,
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(_size(document.size)),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (action) async {
+                        try {
+                          if (action == 'download') {
+                            final path = await cloud.download(document);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Téléchargé dans : $path')));
+                          } else if (action == 'delete') {
+                            await cloud.delete(document);
+                          }
+                        } catch (error) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(content: Text('$error')));
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                            value: 'download',
+                            child: ListTile(
+                                leading: Icon(Icons.download_outlined),
+                                title: Text('Télécharger'))),
+                        PopupMenuItem(
+                            value: 'delete',
+                            child: ListTile(
+                                leading: Icon(Icons.delete_outline),
+                                title: Text('Supprimer'))),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      );
+}
+
+class _CloudEmptyState extends StatelessWidget {
+  const _CloudEmptyState(
+      {required this.icon, required this.title, required this.subtitle});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 76, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(subtitle, textAlign: TextAlign.center),
+          ]),
+        ),
+      );
 }
 
 class LetterGenerator {

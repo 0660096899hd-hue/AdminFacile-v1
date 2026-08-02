@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('AdminFacile V14 démarre correctement', (tester) async {
+  testWidgets('AdminFacile V15.4.3 démarre correctement', (tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final settings = AppSettings();
     final documentStore = DocumentStore();
@@ -22,14 +22,23 @@ void main() {
     expect(find.text('Assistant IA Gemini'), findsOneWidget);
   });
 
+  test('Le PDF d\'une démarche utilise le chemin privé attendu', () {
+    expect(
+      procedureCloudPath('user-123', 'procedure-456'),
+      'user-123/procedures/procedure-456.pdf',
+    );
+  });
+
   test('Assistant local comprend résilier Orange', () {
-    final match = LocalIntentEngine.best('Je veux résilier mon abonnement Orange');
+    final match =
+        LocalIntentEngine.best('Je veux résilier mon abonnement Orange');
     expect(match.template, LetterTemplate.telecom);
     expect(match.model.title.toLowerCase(), contains('résiliation'));
   });
 
   test('Assistant local comprend facture EDF', () {
-    final match = LocalIntentEngine.best('Je souhaite contester une facture EDF');
+    final match =
+        LocalIntentEngine.best('Je souhaite contester une facture EDF');
     expect(match.template, LetterTemplate.energy);
     expect(match.model.title.toLowerCase(), contains('contestation'));
   });
