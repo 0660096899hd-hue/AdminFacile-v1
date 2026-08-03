@@ -19,6 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/voice_input_button.dart';
+import 'signature_pad.dart';
+import 'letter_signature_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const String _defaultSupabaseUrl = 'https://pmnjphgaxcmxmhurhucm.supabase.co';
@@ -39,12 +41,15 @@ bool get _supabaseConfigured =>
     _supabaseUrl.trim().isNotEmpty && _supabasePublishableKey.trim().isNotEmpty;
 
 bool _supabaseReady = false;
+late AppSettings appSettings;
 
 User? get _currentSupabaseUser =>
     _supabaseReady ? Supabase.instance.client.auth.currentUser : null;
 
 String procedureCloudPath(String userId, String procedureId) =>
     '$userId/procedures/$procedureId.pdf';
+
+enum ProcedureCloudState { notSynced, uploading, synced, failed }
 
 enum ProcedureStatus { created, sent, waiting, reminder, completed }
 
@@ -79,6 +84,7 @@ class AdministrativeProcedure {
     this.notes = '',
     this.reminderDate,
     this.archived = false,
+    this.signed = false,
   });
 
   final String id;
@@ -92,6 +98,7 @@ class AdministrativeProcedure {
   final String notes;
   final DateTime? reminderDate;
   final bool archived;
+  final bool signed;
 
   AdministrativeProcedure copyWith({
     ProcedureStatus? status,
@@ -100,6 +107,7 @@ class AdministrativeProcedure {
     bool clearReminder = false,
     bool? archived,
     String? letter,
+    bool? signed,
   }) =>
       AdministrativeProcedure(
         id: id,
@@ -114,6 +122,7 @@ class AdministrativeProcedure {
         reminderDate:
             clearReminder ? null : (reminderDate ?? this.reminderDate),
         archived: archived ?? this.archived,
+        signed: signed ?? this.signed,
       );
 
   Map<String, dynamic> toJson() => {
@@ -128,6 +137,7 @@ class AdministrativeProcedure {
         'notes': notes,
         'reminderDate': reminderDate?.toIso8601String(),
         'archived': archived,
+        'signed': signed,
       };
 
   factory AdministrativeProcedure.fromJson(Map<String, dynamic> json) {
@@ -150,6 +160,7 @@ class AdministrativeProcedure {
       notes: json['notes'] as String? ?? '',
       reminderDate: DateTime.tryParse(json['reminderDate'] as String? ?? ''),
       archived: json['archived'] as bool? ?? false,
+      signed: json['signed'] as bool? ?? false,
     );
   }
 }
@@ -361,6 +372,7 @@ Future<void> main() async {
   }
 
   final settings = AppSettings();
+  appSettings = settings;
   final documentStore = DocumentStore();
   final procedureStore = appProcedureStore;
 
@@ -403,9 +415,17 @@ class AppSettings extends ChangeNotifier {
   String phone = '';
   String email = '';
   bool comfortMode = false;
+  String signaturePath = '';
+  bool autoInsertSignature = false;
   AppThemePreference themePreference = AppThemePreference.dark;
 
-  String get greeting => firstName.isEmpty ? 'Bienvenue' : 'Bonjour $firstName';
+  String get greeting {
+    final name = firstName.trim();
+    if (name.isEmpty) return 'Bienvenue';
+    final normalized =
+        '${name[0].toUpperCase()}${name.substring(1).toLowerCase()}';
+    return 'Bonjour $normalized';
+  }
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
@@ -417,6 +437,8 @@ class AppSettings extends ChangeNotifier {
     phone = _prefs!.getString('phone') ?? '';
     email = _prefs!.getString('email') ?? '';
     comfortMode = _prefs!.getBool('comfortMode') ?? false;
+    signaturePath = _prefs!.getString('signaturePathV17') ?? '';
+    autoInsertSignature = _prefs!.getBool('autoInsertSignatureV17') ?? false;
     final savedTheme =
         _prefs!.getString('themePreference') ?? AppThemePreference.dark.name;
     themePreference = AppThemePreference.values.firstWhere(
@@ -444,6 +466,38 @@ class AppSettings extends ChangeNotifier {
     comfortMode = value;
     final prefs = _prefs ??= await SharedPreferences.getInstance();
     await prefs.setBool('comfortMode', value);
+    notifyListeners();
+  }
+
+  bool get hasSignature =>
+      signaturePath.isNotEmpty && File(signaturePath).existsSync();
+
+  Future<void> saveSignatureBytes(Uint8List bytes,
+      {Directory? directory}) async {
+    directory ??= await getApplicationDocumentsDirectory();
+    final file = File('${directory.path}/adminfacile_signature.png');
+    await file.writeAsBytes(bytes, flush: true);
+    signaturePath = file.path;
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await prefs.setString('signaturePathV17', signaturePath);
+    notifyListeners();
+  }
+
+  Future<void> removeSignature() async {
+    final file = File(signaturePath);
+    if (await file.exists()) await file.delete();
+    signaturePath = '';
+    autoInsertSignature = false;
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await prefs.remove('signaturePathV17');
+    await prefs.setBool('autoInsertSignatureV17', false);
+    notifyListeners();
+  }
+
+  Future<void> setAutoInsertSignature(bool value) async {
+    autoInsertSignature = value && hasSignature;
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await prefs.setBool('autoInsertSignatureV17', autoInsertSignature);
     notifyListeners();
   }
 
@@ -724,8 +778,9 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomeScreen(
+      LegacyHomeScreen(
         settings: widget.settings,
+        documentStore: widget.documentStore,
         procedureStore: widget.procedureStore,
         openMenu: () => _scaffoldKey.currentState?.openDrawer(),
         openGlobalSearch: () => Navigator.of(context).push(MaterialPageRoute(
@@ -742,7 +797,7 @@ class _AppShellState extends State<AppShell> {
                 ProblemDescriptionScreen(settings: widget.settings))),
         openAiWriter: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) =>
-                GeminiLetterWriterScreen(settings: widget.settings))),
+                GeminiLetterWriterV156Screen(settings: widget.settings))),
         openTranslator: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const TranslationScreen()),
         ),
@@ -750,6 +805,12 @@ class _AppShellState extends State<AppShell> {
           MaterialPageRoute(builder: (_) => const DictationScreen()),
         ),
         openProcedures: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ProceduresScreen(store: widget.procedureStore),
+          ),
+        ),
+        openDocuments: () => setState(() => index = 3),
+        openSecureSpace: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ProceduresScreen(store: widget.procedureStore),
           ),
@@ -782,7 +843,7 @@ class _AppShellState extends State<AppShell> {
           Navigator.of(context).pop();
           Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
-                  GeminiLetterWriterScreen(settings: widget.settings)));
+                  GeminiLetterWriterV156Screen(settings: widget.settings)));
         },
         openLibrary: () {
           Navigator.of(context).pop();
@@ -1140,10 +1201,93 @@ class _SearchEmptyState extends StatelessWidget {
       ]));
 }
 
+class DashboardMetrics {
+  DashboardMetrics({
+    required List<AdministrativeProcedure> procedures,
+    required List<SavedDocument> documents,
+    DateTime? now,
+  }) {
+    final today = DateUtils.dateOnly(now ?? DateTime.now());
+    final inSevenDays = today.add(const Duration(days: 7));
+    activeProcedures = procedures
+        .where((item) =>
+            !item.archived && item.status != ProcedureStatus.completed)
+        .length;
+    completedProcedures = procedures
+        .where((item) => item.status == ProcedureStatus.completed)
+        .length;
+    waitingProcedures = procedures
+        .where((item) =>
+            !item.archived &&
+            (item.status == ProcedureStatus.waiting ||
+                item.status == ProcedureStatus.sent))
+        .length;
+    proceduresWithReminder = procedures
+        .where((item) => !item.archived && item.reminderDate != null)
+        .length;
+    remindersToday = procedures.where((item) {
+      final date = item.reminderDate;
+      return !item.archived && date != null && DateUtils.isSameDay(date, today);
+    }).length;
+    remindersNextSevenDays = procedures.where((item) {
+      final date = item.reminderDate;
+      if (item.archived || date == null) return false;
+      final day = DateUtils.dateOnly(date);
+      return day.isAfter(today) && !day.isAfter(inSevenDays);
+    }).length;
+    documentsWithDeadline = documents.where((item) {
+      final date = parseDocumentDeadline(item.deadline);
+      return date != null && !date.isBefore(today);
+    }).length;
+    urgentDeadlines = documents.where((item) {
+      final date = parseDocumentDeadline(item.deadline);
+      return date != null &&
+          !date.isBefore(today) &&
+          !date.isAfter(inSevenDays);
+    }).length;
+    favoriteDocuments = documents.where((item) => item.favorite).length;
+    documentCount = documents.length;
+  }
+
+  late final int activeProcedures;
+  late final int completedProcedures;
+  late final int waitingProcedures;
+  late final int proceduresWithReminder;
+  late final int remindersToday;
+  late final int remindersNextSevenDays;
+  late final int documentsWithDeadline;
+  late final int urgentDeadlines;
+  late final int favoriteDocuments;
+  late final int documentCount;
+
+  bool get hasUrgent => remindersToday > 0 || urgentDeadlines > 0;
+  bool get hasWarning =>
+      remindersNextSevenDays > 0 ||
+      waitingProcedures > 0 ||
+      documentsWithDeadline > 0;
+
+  static DateTime? parseDocumentDeadline(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final direct = DateTime.tryParse(value.trim());
+    if (direct != null) return DateUtils.dateOnly(direct);
+    final match =
+        RegExp(r'(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})').firstMatch(value);
+    if (match == null) return null;
+    final day = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    final year = int.parse(match.group(3)!);
+    final date = DateTime(year, month, day);
+    return date.day == day && date.month == month && date.year == year
+        ? date
+        : null;
+  }
+}
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
     required this.settings,
+    required this.documentStore,
     required this.procedureStore,
     required this.openScanner,
     required this.openLetters,
@@ -1153,12 +1297,15 @@ class HomeScreen extends StatelessWidget {
     required this.openTranslator,
     required this.openDictation,
     required this.openProcedures,
+    required this.openDocuments,
+    required this.openSecureSpace,
     required this.openMenu,
     required this.openGlobalSearch,
     required this.openProfile,
   });
 
   final AppSettings settings;
+  final DocumentStore documentStore;
   final ProcedureStore procedureStore;
   final VoidCallback openScanner;
   final VoidCallback openLetters;
@@ -1168,6 +1315,484 @@ class HomeScreen extends StatelessWidget {
   final VoidCallback openTranslator;
   final VoidCallback openDictation;
   final VoidCallback openProcedures;
+  final VoidCallback openDocuments;
+  final VoidCallback openSecureSpace;
+  final VoidCallback openMenu;
+  final VoidCallback openGlobalSearch;
+  final VoidCallback openProfile;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: Listenable.merge([settings, procedureStore, documentStore]),
+        builder: (context, _) {
+          final metrics = DashboardMetrics(
+            procedures: procedureStore.items,
+            documents: documentStore.documents,
+          );
+          final procedures = procedureStore.items.take(3).toList();
+          final documents = documentStore.documents.take(3).toList();
+          final scheme = Theme.of(context).colorScheme;
+          final syncColor = _currentSupabaseUser != null
+              ? Colors.green
+              : scheme.onSurfaceVariant;
+          final dark = Theme.of(context).brightness == Brightness.dark;
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: dark
+                    ? const [Color(0xFF07162A), Color(0xFF020C1D)]
+                    : const [Color(0xFFF1F6FD), Color(0xFFFAFBFD)],
+              ),
+            ),
+            child: SafeArea(
+              bottom: false,
+              child: LayoutBuilder(builder: (context, constraints) {
+                final tablet = constraints.maxWidth >= 700;
+                return ListView(
+                  key: const Key('dashboard-v16'),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: tablet ? 32 : 16,
+                    vertical: 10,
+                  ),
+                  children: [
+                    Row(children: [
+                      IconButton(
+                        tooltip: 'Menu',
+                        onPressed: openMenu,
+                        icon: const Icon(Icons.menu_rounded),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(settings.greeting,
+                                key: const Key('dashboard-greeting'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w800)),
+                            Text('Votre assistant administratif',
+                                style: Theme.of(context).textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Recherche globale',
+                        onPressed: openGlobalSearch,
+                        icon: const Icon(Icons.search_rounded),
+                      ),
+                      IconButton.filledTonal(
+                        key: const Key('dashboard-profile-button'),
+                        tooltip: 'Profil',
+                        onPressed: openProfile,
+                        icon: const Icon(Icons.person_rounded),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      elevation: dark ? 0 : 1,
+                      color: dark ? const Color(0xFF0A1B31) : scheme.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 9),
+                        child: Row(children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: scheme.primaryContainer,
+                            child: Icon(
+                              _currentSupabaseUser == null
+                                  ? Icons.person_outline_rounded
+                                  : Icons.person_rounded,
+                              size: 19,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _currentSupabaseUser == null
+                                      ? 'Compte déconnecté'
+                                      : 'Compte connecté',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700),
+                                ),
+                                Text(
+                                  _supabaseConfigured
+                                      ? 'Synchronisation disponible'
+                                      : 'Synchronisation indisponible',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            key: const Key('synchronization-badge'),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: syncColor.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              _currentSupabaseUser != null
+                                  ? 'Synchronisé'
+                                  : 'Local',
+                              style: TextStyle(
+                                  color: syncColor,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const _DashboardTitle('Aujourd’hui'),
+                    const SizedBox(height: 6),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 2,
+                      childAspectRatio: tablet ? 4.2 : 2.25,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      children: [
+                        _MetricCard(
+                            key: const Key('active-procedures-count'),
+                            icon: Icons.pending_actions_rounded,
+                            value: metrics.activeProcedures,
+                            label: 'En cours',
+                            color: scheme.primary),
+                        _MetricCard(
+                            icon: Icons.notifications_active_outlined,
+                            value: metrics.proceduresWithReminder,
+                            label: 'Relances',
+                            color: scheme.primary),
+                        _MetricCard(
+                            icon: Icons.hourglass_top_rounded,
+                            value: metrics.waitingProcedures,
+                            label: 'En attente',
+                            color: scheme.primary),
+                        _MetricCard(
+                            icon: Icons.check_circle_outline_rounded,
+                            value: metrics.completedProcedures,
+                            label: 'Terminées',
+                            color: scheme.primary),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const _DashboardTitle('Actions rapides'),
+                    const SizedBox(height: 6),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: 8,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: tablet ? 4 : 2,
+                        mainAxisExtent: 84,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                      ),
+                      itemBuilder: (context, index) => [
+                        _QuickAction(Icons.document_scanner_outlined, 'Scanner',
+                            openScanner),
+                        _QuickAction(Icons.auto_awesome_rounded,
+                            'Rédiger avec Gemini', openAiWriter),
+                        _QuickAction(
+                            Icons.edit_note_rounded, 'Lettre', openLetters),
+                        _QuickAction(Icons.folder_copy_outlined, 'Démarches',
+                            openProcedures),
+                        _QuickAction(
+                            Icons.folder_outlined, 'Documents', openDocuments),
+                        _QuickAction(
+                            Icons.cloud_outlined, 'Cloud', openSecureSpace),
+                        _QuickAction(Icons.translate_rounded, 'Traduire',
+                            openTranslator),
+                        _QuickAction(Icons.search_rounded, 'Rechercher',
+                            openGlobalSearch),
+                      ][index],
+                    ),
+                    const SizedBox(height: 14),
+                    const _DashboardTitle('À ne pas manquer'),
+                    const SizedBox(height: 6),
+                    _AttentionList(metrics: metrics),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      const Expanded(
+                          child: _DashboardTitle('Activité récente')),
+                      TextButton(
+                          onPressed: openDocuments,
+                          child: const Text('Documents')),
+                      TextButton(
+                          onPressed: openProcedures,
+                          child: const Text('Démarches')),
+                    ]),
+                    _RecentActivity(
+                        procedures: procedures,
+                        documents: documents,
+                        openProcedures: openProcedures,
+                        openDocuments: openDocuments),
+                  ],
+                );
+              }),
+            ),
+          );
+        },
+      );
+}
+
+class _DashboardTitle extends StatelessWidget {
+  const _DashboardTitle(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) => Text(text,
+      style: Theme.of(context)
+          .textTheme
+          .titleMedium
+          ?.copyWith(fontWeight: FontWeight.w800));
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard(
+      {super.key,
+      required this.icon,
+      required this.value,
+      required this.label,
+      required this.color});
+  final IconData icon;
+  final int value;
+  final String label;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Row(children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: .13),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$value',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            height: 1,
+                            color: color,
+                            fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 2),
+                    Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ])),
+      );
+}
+
+class _AttentionList extends StatelessWidget {
+  const _AttentionList({required this.metrics});
+  final DashboardMetrics metrics;
+  @override
+  Widget build(BuildContext context) {
+    final items = <(IconData, String, Color)>[
+      if (metrics.remindersToday > 0)
+        (
+          Icons.notification_important_rounded,
+          '${metrics.remindersToday} relance(s) aujourd’hui',
+          Colors.red
+        ),
+      if (metrics.remindersNextSevenDays > 0)
+        (
+          Icons.event_rounded,
+          '${metrics.remindersNextSevenDays} relance(s) dans les 7 jours',
+          Colors.orange
+        ),
+      if (metrics.waitingProcedures > 0)
+        (
+          Icons.hourglass_top_rounded,
+          '${metrics.waitingProcedures} démarche(s) en attente de réponse',
+          Colors.orange
+        ),
+      if (metrics.documentsWithDeadline > 0)
+        (
+          Icons.schedule_rounded,
+          '${metrics.documentsWithDeadline} document(s) avec échéance',
+          metrics.urgentDeadlines > 0 ? Colors.red : Colors.orange
+        ),
+    ];
+    if (items.isEmpty) {
+      return const Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+              dense: true,
+              visualDensity: VisualDensity(vertical: -4),
+              leading: Icon(Icons.check_circle_rounded, color: Colors.green),
+              title: Text('Aucune action urgente')));
+    }
+    return Card(
+        margin: EdgeInsets.zero,
+        child: Column(children: [
+          for (final item in items)
+            ListTile(
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -3),
+                leading: Icon(item.$1, color: item.$3),
+                title:
+                    Text(item.$2, maxLines: 1, overflow: TextOverflow.ellipsis))
+        ]));
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  const _QuickAction(this.icon, this.label, this.onTap);
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Card(
+      key: ValueKey('quick-action-$label'),
+      margin: EdgeInsets.zero,
+      child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              child: Row(children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primaryContainer
+                        .withValues(alpha: .7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon,
+                      size: 22,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: Text(label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700))),
+                Icon(Icons.chevron_right_rounded,
+                    size: 17,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ]))));
+}
+
+class _RecentActivity extends StatelessWidget {
+  const _RecentActivity(
+      {required this.procedures,
+      required this.documents,
+      required this.openProcedures,
+      required this.openDocuments});
+  final List<AdministrativeProcedure> procedures;
+  final List<SavedDocument> documents;
+  final VoidCallback openProcedures;
+  final VoidCallback openDocuments;
+  @override
+  Widget build(BuildContext context) {
+    if (procedures.isEmpty && documents.isEmpty) {
+      return const Card(
+          child: ListTile(
+              leading: Icon(Icons.history_rounded),
+              title: Text('Aucune activité récente')));
+    }
+    return Card(
+        key: const Key('recent-activity'),
+        child: Column(children: [
+          for (final item in procedures)
+            ListTile(
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -3),
+                onTap: openProcedures,
+                leading: const Icon(Icons.assignment_outlined),
+                title: Text(item.title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(item.status.label)),
+          for (final item in documents)
+            ListTile(
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -3),
+                onTap: openDocuments,
+                leading: const Icon(Icons.description_outlined),
+                title: Text(item.title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(item.category)),
+        ]));
+  }
+}
+
+class LegacyHomeScreen extends StatelessWidget {
+  const LegacyHomeScreen({
+    super.key,
+    required this.settings,
+    required this.documentStore,
+    required this.procedureStore,
+    required this.openScanner,
+    required this.openLetters,
+    required this.openSearch,
+    required this.openProblem,
+    required this.openAiWriter,
+    required this.openTranslator,
+    required this.openDictation,
+    required this.openProcedures,
+    required this.openDocuments,
+    required this.openSecureSpace,
+    required this.openMenu,
+    required this.openGlobalSearch,
+    required this.openProfile,
+  });
+
+  final AppSettings settings;
+  final DocumentStore documentStore;
+  final ProcedureStore procedureStore;
+  final VoidCallback openScanner;
+  final VoidCallback openLetters;
+  final VoidCallback openSearch;
+  final VoidCallback openProblem;
+  final VoidCallback openAiWriter;
+  final VoidCallback openTranslator;
+  final VoidCallback openDictation;
+  final VoidCallback openProcedures;
+  final VoidCallback openDocuments;
+  final VoidCallback openSecureSpace;
   final VoidCallback openMenu;
   final VoidCallback openGlobalSearch;
   final VoidCallback openProfile;
@@ -1207,6 +1832,7 @@ class HomeScreen extends StatelessWidget {
             child: SafeArea(
               bottom: false,
               child: ListView(
+                key: const Key('dashboard-v17'),
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 30),
                 children: [
                   _DarkHeader(
@@ -1214,7 +1840,8 @@ class HomeScreen extends StatelessWidget {
                       settings: settings,
                       openMenu: openMenu,
                       openSearch: openGlobalSearch,
-                      openProfile: openProfile),
+                      openProfile: openProfile,
+                      notificationCount: reminders),
                   const SizedBox(height: 20),
                   _DarkHeroCard(onScan: openScanner, onWrite: openAiWriter),
                   const SizedBox(height: 18),
@@ -1284,46 +1911,62 @@ class _DarkHeader extends StatelessWidget {
       required this.settings,
       required this.openMenu,
       required this.openSearch,
-      required this.openProfile});
+      required this.openProfile,
+      required this.notificationCount});
   final String greeting;
   final AppSettings settings;
   final VoidCallback openMenu;
   final VoidCallback openSearch;
   final VoidCallback openProfile;
+  final int notificationCount;
   @override
   Widget build(BuildContext context) => Row(children: [
         _HeaderCircle(icon: Icons.menu_rounded, onTap: openMenu),
         const SizedBox(width: 10),
-        const Expanded(
-            child:
-                Align(alignment: Alignment.centerLeft, child: _BrandLockup())),
-        _HeaderCircle(
-          icon: Theme.of(context).brightness == Brightness.dark
-              ? Icons.light_mode_rounded
-              : Icons.dark_mode_rounded,
-          onTap: () => settings.setThemePreference(
-              Theme.of(context).brightness == Brightness.dark
-                  ? AppThemePreference.light
-                  : AppThemePreference.dark),
+        Expanded(
+          child: Row(children: [
+            const AdminFacileMark(size: 38),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('AdminFacile',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w900)),
+                  Text('Votre assistant administratif',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ]),
         ),
-        const SizedBox(width: 10),
-        _HeaderCircle(icon: Icons.search_rounded, onTap: openSearch),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Stack(clipBehavior: Clip.none, children: [
-          _HeaderCircle(icon: Icons.notifications_none_rounded, onTap: () {}),
-          const Positioned(
-              right: -2,
-              top: -5,
-              child: CircleAvatar(
-                  radius: 10,
-                  backgroundColor: Color(0xFFFF3B3B),
-                  child: Text('3',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold)))),
+          _HeaderCircle(
+              icon: Icons.notifications_none_rounded, onTap: openSearch),
+          if (notificationCount > 0)
+            Positioned(
+                right: -2,
+                top: -5,
+                child: CircleAvatar(
+                    radius: 10,
+                    backgroundColor: const Color(0xFFFF3B3B),
+                    child: Text(
+                        '${notificationCount > 9 ? '9+' : notificationCount}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)))),
         ]),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Tooltip(
           message:
               _currentSupabaseUser == null ? 'Se connecter' : 'Compte connecté',
@@ -1331,6 +1974,7 @@ class _DarkHeader extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               _HeaderCircle(
+                key: const Key('dashboard-profile-button'),
                 icon: _currentSupabaseUser == null
                     ? Icons.person_outline_rounded
                     : Icons.person_rounded,
@@ -1352,7 +1996,7 @@ class _DarkHeader extends StatelessWidget {
 }
 
 class _HeaderCircle extends StatelessWidget {
-  const _HeaderCircle({required this.icon, this.onTap});
+  const _HeaderCircle({super.key, required this.icon, this.onTap});
   final IconData icon;
   final VoidCallback? onTap;
   @override
@@ -1408,31 +2052,39 @@ class _DarkHeroCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: configured
-                          ? const Color(0xFF0B9B69)
-                          : const Color(0xFFB66B10),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(configured ? Icons.check_circle : Icons.info_outline,
-                          color: Colors.white, size: 15),
-                      const SizedBox(width: 6),
-                      Text(
-                        configured ? 'GEMINI CONNECTÉ' : 'IA À CONFIGURER',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 11, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: configured
+                            ? const Color(0xFF0B9B69)
+                            : const Color(0xFFB66B10),
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                    ]),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(
+                            configured
+                                ? Icons.check_circle
+                                : Icons.info_outline,
+                            color: Colors.white,
+                            size: 15),
+                        const SizedBox(width: 6),
+                        Text(
+                          configured ? 'GEMINI CONNECTÉ' : 'IA À CONFIGURER',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900),
+                        ),
+                      ]),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'Assistant IA Gemini',
+                    'Simplifiez vos démarches au quotidien',
                     style: TextStyle(
                         color: Colors.white,
                         fontSize: compact ? 24 : 29,
@@ -1441,7 +2093,7 @@ class _DarkHeroCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Scannez et comprenez un courrier, ou rédigez une lettre professionnelle sur mesure.',
+                    'Générez, envoyez et suivez vos courriers administratifs simplement.',
                     style: TextStyle(
                         color: const Color(0xFFD7E2F3),
                         fontSize: compact ? 13 : 15,
@@ -1450,6 +2102,7 @@ class _DarkHeroCard extends StatelessWidget {
                   const SizedBox(height: 17),
                   Wrap(spacing: 9, runSpacing: 9, children: [
                     FilledButton.icon(
+                      key: const Key('create-letter-v17'),
                       style: FilledButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xFF075CF5),
@@ -1458,9 +2111,9 @@ class _DarkHeroCard extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
-                      onPressed: onScan,
-                      icon: const Icon(Icons.document_scanner_rounded),
-                      label: const Text('Analyser un courrier',
+                      onPressed: onWrite,
+                      icon: const Icon(Icons.edit_note_rounded),
+                      label: const Text('Créer une lettre',
                           style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                     OutlinedButton.icon(
@@ -1472,9 +2125,9 @@ class _DarkHeroCard extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
-                      onPressed: onWrite,
-                      icon: const Icon(Icons.auto_awesome_rounded),
-                      label: const Text('Rédiger avec Gemini',
+                      onPressed: onScan,
+                      icon: const Icon(Icons.document_scanner_rounded),
+                      label: const Text('Scanner un document',
                           style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                   ]),
@@ -1534,44 +2187,48 @@ class _ShortcutGrid extends StatelessWidget {
   final int activeCount;
   final VoidCallback openProblem, openSearch, openProcedures, openLetters;
   @override
-  Widget build(BuildContext context) =>
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(
-            child: _DarkShortcut(
-                icon: Icons.smart_toy_rounded,
-                label: 'Assistant\nadministratif',
-                accent: const Color(0xFF2388FF),
-                onTap: openProblem)),
-        const SizedBox(width: 8),
-        Expanded(
-            child: _DarkShortcut(
-                icon: Icons.menu_book_rounded,
-                label: 'Bibliothèque\nde modèles',
-                accent: const Color(0xFF20D09B),
-                onTap: openSearch)),
-        const SizedBox(width: 8),
-        Expanded(
-            child: _DarkShortcut(
-                icon: Icons.folder_rounded,
-                label: 'Mes\ndémarches',
-                accent: const Color(0xFFFFAD1F),
-                badge: activeCount,
-                onTap: openProcedures)),
-        const SizedBox(width: 8),
-        Expanded(
-            child: _DarkShortcut(
-                icon: Icons.star_rounded,
-                label: 'Favoris',
-                accent: const Color(0xFF9B55FF),
-                onTap: openSearch)),
-        const SizedBox(width: 8),
-        Expanded(
-            child: _DarkShortcut(
-                icon: Icons.history_rounded,
-                label: 'Historique',
-                accent: const Color(0xFFFF557D),
-                onTap: openLetters)),
-      ]);
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, c) {
+        final shortcuts = [
+          _DarkShortcut(
+              icon: Icons.smart_toy_rounded,
+              label: 'Assistant\nadministratif',
+              accent: const Color(0xFF2388FF),
+              onTap: openProblem),
+          _DarkShortcut(
+              icon: Icons.menu_book_rounded,
+              label: 'Bibliothèque\nde modèles',
+              accent: const Color(0xFF20D09B),
+              onTap: openSearch),
+          _DarkShortcut(
+              icon: Icons.folder_rounded,
+              label: 'Mes\ndémarches',
+              accent: const Color(0xFFFFAD1F),
+              badge: activeCount,
+              onTap: openProcedures),
+          _DarkShortcut(
+              icon: Icons.star_rounded,
+              label: 'Favoris',
+              accent: const Color(0xFF9B55FF),
+              onTap: openSearch),
+          _DarkShortcut(
+              icon: Icons.history_rounded,
+              label: 'Historique',
+              accent: const Color(0xFFFF557D),
+              onTap: openLetters),
+        ];
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: shortcuts.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: c.maxWidth >= 700 ? 5 : 2,
+            mainAxisExtent: 104,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemBuilder: (_, index) => shortcuts[index],
+        );
+      });
 }
 
 class _DarkShortcut extends StatelessWidget {
@@ -1589,57 +2246,54 @@ class _DarkShortcut extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return AspectRatio(
-        aspectRatio: .63,
-        child: Material(
-            color: dark ? const Color(0xFF08172B) : Colors.white,
-            elevation: dark ? 0 : 1,
+    return Material(
+        color: dark ? const Color(0xFF08172B) : Colors.white,
+        elevation: dark ? 0 : 1,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+            onTap: onTap,
             borderRadius: BorderRadius.circular(18),
-            child: InkWell(
-                onTap: onTap,
-                borderRadius: BorderRadius.circular(18),
-                child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
-                    decoration: BoxDecoration(
-                        border:
-                            Border.all(color: accent.withValues(alpha: .38)),
-                        borderRadius: BorderRadius.circular(18)),
-                    child: Stack(children: [
-                      Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(icon, color: accent, size: 35),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                                width: double.infinity,
-                                child: Text(label,
-                                    textAlign: TextAlign.center,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: label.startsWith('Mes')
-                                            ? accent
-                                            : (dark
-                                                ? Colors.white
-                                                : const Color(0xFF102748)),
-                                        fontSize: 10.5,
-                                        height: 1.14,
-                                        fontWeight: FontWeight.w600))),
-                          ]),
-                      if ((badge ?? 0) > 0)
-                        Positioned(
-                            right: 0,
-                            top: 0,
-                            child: CircleAvatar(
-                                radius: 10,
-                                backgroundColor: const Color(0xFFFF3B3B),
-                                child: Text('${badge! > 99 ? '99+' : badge}',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold)))),
-                    ])))));
+            child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+                decoration: BoxDecoration(
+                    border: Border.all(color: accent.withValues(alpha: .38)),
+                    borderRadius: BorderRadius.circular(18)),
+                child: Stack(children: [
+                  Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(icon, color: accent, size: 35),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                            width: double.infinity,
+                            child: Text(label,
+                                textAlign: TextAlign.center,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: label.startsWith('Mes')
+                                        ? accent
+                                        : (dark
+                                            ? Colors.white
+                                            : const Color(0xFF102748)),
+                                    fontSize: 10.5,
+                                    height: 1.14,
+                                    fontWeight: FontWeight.w600))),
+                      ]),
+                  if ((badge ?? 0) > 0)
+                    Positioned(
+                        right: 0,
+                        top: 0,
+                        child: CircleAvatar(
+                            radius: 10,
+                            backgroundColor: const Color(0xFFFF3B3B),
+                            child: Text('${badge! > 99 ? '99+' : badge}',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold)))),
+                ]))));
   }
 }
 
@@ -2705,6 +3359,91 @@ class PdfDocumentPreviewScreen extends StatelessWidget {
           allowSharing: true,
           pdfFileName: 'AdminFacile_document.pdf',
         ),
+      );
+}
+
+/// Aperçu interne : aucune impression n'est lancée pendant l'ouverture.
+class InternalDocumentPreviewScreen extends StatelessWidget {
+  const InternalDocumentPreviewScreen({
+    super.key,
+    required this.bytes,
+    required this.title,
+    required this.isImage,
+  });
+
+  final Uint8List bytes;
+  final String title;
+  final bool isImage;
+
+  Future<void> _share() async {
+    final dir = await getTemporaryDirectory();
+    final extension = isImage ? 'jpg' : 'pdf';
+    final file = File('${dir.path}/adminfacile_preview.$extension');
+    await file.writeAsBytes(bytes, flush: true);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(file.path)], subject: title),
+      );
+    } finally {
+      if (await file.exists()) await file.delete();
+    }
+  }
+
+  Future<void> _download() async {
+    await FilePicker.platform.saveFile(
+      dialogTitle: 'Télécharger le document',
+      fileName: isImage ? 'document.jpg' : 'document.pdf',
+      type: FileType.custom,
+      allowedExtensions: [isImage ? 'jpg' : 'pdf'],
+      bytes: bytes,
+    );
+  }
+
+  Future<void> _print() async {
+    if (!isImage) {
+      await Printing.layoutPdf(onLayout: (_) async => bytes, name: title);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: const Key('internal-document-preview'),
+        appBar: AppBar(
+          title: Text(title, overflow: TextOverflow.ellipsis),
+          actions: [
+            IconButton(
+                key: const Key('preview-share'),
+                tooltip: 'Partager',
+                onPressed: _share,
+                icon: const Icon(Icons.share_outlined)),
+            IconButton(
+                key: const Key('preview-download'),
+                tooltip: 'Télécharger',
+                onPressed: _download,
+                icon: const Icon(Icons.download_outlined)),
+            if (!isImage)
+              IconButton(
+                  key: const Key('preview-print'),
+                  tooltip: 'Imprimer',
+                  onPressed: _print,
+                  icon: const Icon(Icons.print_outlined)),
+          ],
+        ),
+        body: isImage
+            ? InteractiveViewer(
+                minScale: .5,
+                maxScale: 5,
+                child: Center(child: Image.memory(bytes, fit: BoxFit.contain)),
+              )
+            : PdfPreview(
+                key: const Key('internal-pdf-preview'),
+                build: (_) async => bytes,
+                allowPrinting: false,
+                allowSharing: false,
+                canChangeOrientation: false,
+                canChangePageFormat: false,
+                useActions: false,
+              ),
       );
 }
 
@@ -3992,6 +4731,743 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
       );
 }
 
+enum GeminiLetterTypeV156 {
+  complaint('Réclamation'),
+  cancellation('Résiliation'),
+  dispute('Contestation'),
+  documentRequest('Demande de document'),
+  organisationReply('Réponse à un organisme'),
+  reminder('Relance'),
+  freeLetter('Lettre libre');
+
+  const GeminiLetterTypeV156(this.label);
+  final String label;
+}
+
+enum GeminiLetterToneV156 {
+  courteous('Courtois'),
+  professional('Professionnel'),
+  firm('Ferme'),
+  verySimple('Très simple');
+
+  const GeminiLetterToneV156(this.label);
+  final String label;
+}
+
+enum LetterFormatV1561 {
+  official('Courrier officiel'),
+  email('E-mail'),
+  registered('Lettre recommandée'),
+  formalNotice('Mise en demeure');
+
+  const LetterFormatV1561(this.label);
+  final String label;
+}
+
+String buildFormattedLetterV1561({
+  required LetterFormatV1561 format,
+  required String recipient,
+  required String subject,
+  required String body,
+  required AppSettings settings,
+}) {
+  String completed(String value, String placeholder) =>
+      value.trim().isEmpty ? '[$placeholder À COMPLÉTER]' : value.trim();
+
+  final fullName = '${settings.firstName} ${settings.lastName}'.trim();
+  final senderName = completed(fullName, 'NOM');
+  final senderAddress = completed(settings.address, 'ADRESSE');
+  final senderLocality = '${settings.postalCode} ${settings.city}'.trim();
+  final senderCity = completed(senderLocality, 'VILLE');
+  final safeRecipient = completed(recipient, 'DESTINATAIRE');
+  final safeSubject = completed(subject, 'OBJET');
+  final safeBody = completed(body, 'MESSAGE');
+  final signature = completed(fullName, 'NOM ET SIGNATURE');
+
+  if (format == LetterFormatV1561.email) {
+    return '''Destinataire : $safeRecipient
+Objet : $safeSubject
+
+$safeBody
+
+$signature''';
+  }
+
+  final heading = switch (format) {
+    LetterFormatV1561.registered =>
+      'Lettre recommandée avec accusé de réception\n\n',
+    LetterFormatV1561.formalNotice => 'MISE EN DEMEURE\n\n',
+    _ => '',
+  };
+  return '''$senderName
+$senderAddress
+$senderCity
+
+$safeRecipient
+[ADRESSE DU DESTINATAIRE À COMPLÉTER]
+
+[VILLE ET DATE À COMPLÉTER]
+
+${heading}Objet : $safeSubject
+
+Madame, Monsieur,
+
+$safeBody
+
+Veuillez agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+$signature''';
+}
+
+class OfficialLetterSheet extends StatelessWidget {
+  const OfficialLetterSheet({
+    super.key,
+    required this.child,
+    this.email = false,
+  });
+
+  final Widget child;
+  final bool email;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          key: const Key('official-letter-sheet'),
+          width: double.infinity,
+          constraints: BoxConstraints(maxWidth: email ? 760 : 720),
+          padding: EdgeInsets.symmetric(
+            horizontal: MediaQuery.sizeOf(context).width < 500 ? 22 : 48,
+            vertical: email ? 28 : 44,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 14,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Theme(
+            data: Theme.of(context).copyWith(
+              inputDecorationTheme: const InputDecorationTheme(
+                filled: false,
+                border: InputBorder.none,
+              ),
+              textSelectionTheme: const TextSelectionThemeData(
+                cursorColor: Color(0xFF136DF2),
+                selectionColor: Color(0x663B82F6),
+                selectionHandleColor: Color(0xFF136DF2),
+              ),
+            ),
+            child: DefaultTextStyle.merge(
+              style: const TextStyle(color: Colors.black),
+              child: child,
+            ),
+          ),
+        ),
+      );
+}
+
+Future<Uint8List> buildSignedLetterPdf({
+  required String text,
+  required String subject,
+  Uint8List? signatureBytes,
+  String senderName = '',
+}) async {
+  return LetterSignatureService.buildLetterPdf(
+    text: text,
+    subject: subject,
+    signed: signatureBytes != null,
+    signatureBytes: signatureBytes,
+    senderName: senderName,
+  );
+}
+
+bool shouldInsertSignature(AppSettings? settings) =>
+    settings != null && settings.autoInsertSignature && settings.hasSignature;
+
+class LetterSignatureOption extends StatelessWidget {
+  const LetterSignatureOption({
+    super.key,
+    required this.settings,
+    required this.value,
+    required this.onChanged,
+  });
+  final AppSettings settings;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        key: const Key('letter-signature-option'),
+        contentPadding: EdgeInsets.zero,
+        value: value,
+        onChanged: (enabled) {
+          if (enabled && !settings.hasSignature) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text(
+                  'Aucune signature enregistrée. Ajoutez-la dans Profil > Ma signature.'),
+              action: SnackBarAction(
+                label: 'Ouvrir le Profil',
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ProfileScreen(settings: settings))),
+              ),
+            ));
+            return;
+          }
+          onChanged(enabled);
+        },
+        title: const Text('Ajouter ma signature à cette lettre'),
+        subtitle: Text(settings.hasSignature
+            ? 'La signature apparaîtra au-dessus du nom de l’expéditeur.'
+            : 'Aucune signature enregistrée dans le Profil.'),
+        secondary: settings.hasSignature
+            ? SizedBox(
+                width: 64,
+                child: Image.file(File(settings.signaturePath),
+                    height: 36, fit: BoxFit.contain))
+            : const Icon(Icons.draw_outlined),
+      );
+}
+
+GeminiGeneratedLetter buildLocalGeminiLetter({
+  required String recipient,
+  required String subject,
+  required String situation,
+  required String desiredResult,
+  required String importantInformation,
+  required GeminiLetterTypeV156 type,
+  required GeminiLetterToneV156 tone,
+}) {
+  String value(String text, String marker) =>
+      text.trim().isEmpty ? '[$marker À COMPLÉTER]' : text.trim();
+  final safeRecipient = value(recipient, 'DESTINATAIRE');
+  final safeSubject = value(subject, 'OBJET');
+  final safeSituation = value(situation, 'SITUATION');
+  final safeResult = value(desiredResult, 'RÉSULTAT SOUHAITÉ');
+  final safeDetails = value(importantInformation, 'INFORMATIONS IMPORTANTES');
+  final opening = switch (tone) {
+    GeminiLetterToneV156.courteous =>
+      'Je vous prie de bien vouloir examiner ma demande.',
+    GeminiLetterToneV156.professional =>
+      'Je vous adresse ce courrier afin de formaliser ma demande.',
+    GeminiLetterToneV156.firm =>
+      'Je vous demande de traiter cette demande dans les meilleurs délais.',
+    GeminiLetterToneV156.verySimple => 'Je vous écris au sujet de ma demande.',
+  };
+  return GeminiGeneratedLetter(
+    title: '${type.label} – $safeRecipient',
+    subject: safeSubject,
+    body: '''$opening
+
+Ma situation : $safeSituation
+
+Résultat souhaité : $safeResult
+
+Informations importantes : $safeDetails
+
+Je vous remercie de me confirmer les suites données à ce courrier.''',
+  );
+}
+
+class GeminiLetterV156Service {
+  static Future<GeminiGeneratedLetter> generate({
+    required String recipient,
+    required String subject,
+    required String situation,
+    required String desiredResult,
+    required String importantInformation,
+    required GeminiLetterTypeV156 type,
+    required GeminiLetterToneV156 tone,
+    required LetterFormatV1561 format,
+  }) async {
+    if (!GeminiLetterWriter.isConfigured) {
+      return buildLocalGeminiLetter(
+        recipient: recipient,
+        subject: subject,
+        situation: situation,
+        desiredResult: desiredResult,
+        importantInformation: importantInformation,
+        type: type,
+        tone: tone,
+      );
+    }
+    final data = await GeminiLetterWriter._requestJson('''
+Rédige le corps d'une lettre administrative française claire, courte et professionnelle.
+Retourne uniquement ce JSON : {"titre":"","objet":"","corps":""}.
+N'ajoute aucune explication autour de la lettre.
+Dans "corps", n'ajoute ni coordonnées, ni objet, ni formule d'appel, ni formule de politesse, ni signature : l'application les compose selon le format choisi.
+N'invente jamais de date, montant, numéro de contrat, nom, adresse, fait ou référence juridique.
+Pour toute information nécessaire mais absente, insère un repère explicite entre crochets, par exemple [NUMÉRO DE CONTRAT À COMPLÉTER].
+Type : ${type.label}
+Format : ${format.label}
+Ton : ${tone.label}
+Destinataire : ${recipient.trim()}
+Objet : ${subject.trim()}
+Situation : ${situation.trim()}
+Résultat souhaité : ${desiredResult.trim()}
+Informations importantes : ${importantInformation.trim()}
+''');
+    String field(String key) => data[key]?.toString().trim() ?? '';
+    if (field('corps').isEmpty) {
+      throw const GeminiApiException('Réponse Gemini vide.');
+    }
+    return GeminiGeneratedLetter(
+      title: field('titre').isEmpty ? type.label : field('titre'),
+      subject: field('objet').isEmpty ? '[OBJET À COMPLÉTER]' : field('objet'),
+      body: field('corps'),
+    );
+  }
+}
+
+class GeminiLetterWriterV156Screen extends StatefulWidget {
+  const GeminiLetterWriterV156Screen({super.key, required this.settings});
+  final AppSettings settings;
+
+  @override
+  State<GeminiLetterWriterV156Screen> createState() =>
+      _GeminiLetterWriterV156ScreenState();
+}
+
+class _GeminiLetterWriterV156ScreenState
+    extends State<GeminiLetterWriterV156Screen> {
+  final recipient = TextEditingController();
+  final subject = TextEditingController();
+  final situation = TextEditingController();
+  final result = TextEditingController();
+  final information = TextEditingController();
+  final letter = TextEditingController();
+  GeminiLetterTypeV156 type = GeminiLetterTypeV156.complaint;
+  GeminiLetterToneV156 tone = GeminiLetterToneV156.professional;
+  LetterFormatV1561 format = LetterFormatV1561.official;
+  String status = 'Prêt';
+  String? error;
+  bool loading = false;
+  bool saved = false;
+  bool addSignature = false;
+
+  @override
+  void initState() {
+    super.initState();
+    addSignature =
+        widget.settings.hasSignature && widget.settings.autoInsertSignature;
+  }
+
+  @override
+  void dispose() {
+    for (final controller in [
+      recipient,
+      subject,
+      situation,
+      result,
+      information,
+      letter
+    ]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _generate() async {
+    if (situation.text.trim().isEmpty && result.text.trim().isEmpty) {
+      setState(
+          () => error = 'Décrivez votre situation ou le résultat souhaité.');
+      return;
+    }
+    setState(() {
+      loading = true;
+      status = 'Rédaction avec Gemini';
+      error = null;
+      saved = false;
+    });
+    try {
+      final generated = await GeminiLetterV156Service.generate(
+        recipient: recipient.text,
+        subject: subject.text,
+        situation: situation.text,
+        desiredResult: result.text,
+        importantInformation: information.text,
+        type: type,
+        tone: tone,
+        format: format,
+      );
+      if (!mounted) return;
+      setState(() {
+        subject.text = generated.subject;
+        letter.text = buildFormattedLetterV1561(
+          format: format,
+          recipient: recipient.text,
+          subject: generated.subject,
+          body: generated.body,
+          settings: widget.settings,
+        );
+        status = 'Lettre prête';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      final local = buildLocalGeminiLetter(
+        recipient: recipient.text,
+        subject: subject.text,
+        situation: situation.text,
+        desiredResult: result.text,
+        importantInformation: information.text,
+        type: type,
+        tone: tone,
+      );
+      setState(() {
+        subject.text = local.subject;
+        letter.text = buildFormattedLetterV1561(
+          format: format,
+          recipient: recipient.text,
+          subject: local.subject,
+          body: local.body,
+          settings: widget.settings,
+        );
+        status = 'Erreur de connexion';
+        error = 'Gemini est indisponible. Une lettre locale a été préparée.';
+      });
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _transform(String action) async {
+    if (letter.text.trim().isEmpty || loading) return;
+    setState(() {
+      loading = true;
+      status = 'Rédaction avec Gemini';
+    });
+    try {
+      final improved = await GeminiLetterWriter.improve(
+        letter: letter.text,
+        tone: action,
+      );
+      if (!mounted) return;
+      setState(() {
+        letter.text = improved;
+        status = 'Lettre prête';
+        saved = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          status = 'Erreur de connexion';
+          error =
+              'Action indisponible. La lettre reste modifiable manuellement.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _saveProcedure() async {
+    if (letter.text.trim().isEmpty || saved) return;
+    final now = DateTime.now();
+    await appProcedureStore.add(AdministrativeProcedure(
+      id: 'gemini_${now.microsecondsSinceEpoch}',
+      title: subject.text.trim().isEmpty ? type.label : subject.text.trim(),
+      organisation: recipient.text.trim().isEmpty
+          ? 'Non renseigné'
+          : recipient.text.trim(),
+      category: type.label,
+      letter: letter.text.trim(),
+      createdAt: now,
+      updatedAt: now,
+      notes: 'Lettre enregistrée localement par l’assistant V15.6.',
+      signed: addSignature && widget.settings.hasSignature,
+    ));
+    if (!mounted) return;
+    setState(() => saved = true);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Lettre enregistrée dans Mes démarches.'),
+    ));
+  }
+
+  Future<Uint8List> _pdf() async {
+    final pdf = pw.Document();
+    final signatureBytes = addSignature && widget.settings.hasSignature
+        ? await File(widget.settings.signaturePath).readAsBytes()
+        : null;
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(56, 52, 56, 58),
+      build: (_) => [
+        pw.Text(
+          'Objet : ${subject.text.trim().isEmpty ? '[OBJET À COMPLÉTER]' : subject.text.trim()}',
+          style: pw.TextStyle(
+            color: PdfColors.black,
+            fontSize: 12,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 18),
+        pw.Text(
+          letter.text.trim(),
+          style: const pw.TextStyle(
+            color: PdfColors.black,
+            fontSize: 11.5,
+            lineSpacing: 3.5,
+          ),
+        ),
+        if (signatureBytes != null) ...[
+          pw.SizedBox(height: 16),
+          pw.Image(pw.MemoryImage(signatureBytes),
+              width: 130, height: 55, fit: pw.BoxFit.contain),
+          if ('${widget.settings.firstName} ${widget.settings.lastName}'
+              .trim()
+              .isNotEmpty)
+            pw.Text(
+                '${widget.settings.firstName} ${widget.settings.lastName}'
+                    .trim(),
+                style:
+                    const pw.TextStyle(color: PdfColors.black, fontSize: 10)),
+        ],
+      ],
+    ));
+    return pdf.save();
+  }
+
+  Future<void> _exportPdf() async {
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Exporter la lettre en PDF',
+      fileName: 'lettre_adminfacile.pdf',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      bytes: await _pdf(),
+    );
+    if (path != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lettre exportée en PDF.')),
+      );
+    }
+  }
+
+  Future<void> _share() async {
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/lettre_adminfacile.pdf');
+    await file.writeAsBytes(await _pdf(), flush: true);
+    await SharePlus.instance.share(ShareParams(
+      files: [XFile(file.path)],
+      subject: subject.text.trim().isEmpty ? type.label : subject.text.trim(),
+    ));
+  }
+
+  Widget _field(TextEditingController controller, String label,
+      {int lines = 1}) {
+    return TextField(
+      controller: controller,
+      minLines: lines,
+      maxLines: lines == 1 ? 3 : lines + 4,
+      decoration: InputDecoration(
+        labelText: label,
+        alignLabelWithHint: lines > 1,
+        suffixIcon: VoiceInputButton(controller: controller),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Rédiger avec Gemini')),
+        body: ListView(padding: const EdgeInsets.all(20), children: [
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: Text(status, key: const Key('gemini-status')),
+              subtitle: Text(GeminiLetterWriter.isConfigured
+                  ? 'Gemini disponible'
+                  : 'Mode local disponible'),
+            ),
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<GeminiLetterTypeV156>(
+            key: const Key('letter-type'),
+            initialValue: type,
+            decoration: const InputDecoration(labelText: 'Type de courrier'),
+            items: GeminiLetterTypeV156.values
+                .map((item) => DropdownMenuItem(
+                      value: item,
+                      child: Text(item.label),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => type = value);
+            },
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<LetterFormatV1561>(
+            key: const Key('letter-format'),
+            initialValue: format,
+            decoration: const InputDecoration(labelText: 'Format'),
+            items: LetterFormatV1561.values
+                .map((item) => DropdownMenuItem(
+                      value: item,
+                      child: Text(item.label),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => format = value);
+            },
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<GeminiLetterToneV156>(
+            key: const Key('letter-tone'),
+            initialValue: tone,
+            decoration: const InputDecoration(labelText: 'Ton'),
+            items: GeminiLetterToneV156.values
+                .map((item) => DropdownMenuItem(
+                      value: item,
+                      child: Text(item.label),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => tone = value);
+            },
+          ),
+          const SizedBox(height: 14),
+          _field(recipient, 'Destinataire ou organisme'),
+          const SizedBox(height: 14),
+          _field(subject, 'Objet'),
+          const SizedBox(height: 14),
+          _field(situation, 'Situation de l’utilisateur', lines: 3),
+          const SizedBox(height: 14),
+          _field(result, 'Résultat souhaité', lines: 2),
+          const SizedBox(height: 14),
+          _field(information, 'Informations importantes à intégrer', lines: 3),
+          if (error != null) ...[
+            const SizedBox(height: 12),
+            Text(error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+          const SizedBox(height: 8),
+          LetterSignatureOption(
+            key: const Key('gemini-signature-option'),
+            settings: widget.settings,
+            value: addSignature,
+            onChanged: (value) => setState(() => addSignature = value),
+          ),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            key: const Key('generate-letter-v156'),
+            onPressed: loading ? null : _generate,
+            icon: loading
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Générer la lettre'),
+          ),
+          if (letter.text.trim().isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Text('Lettre générée (modifiable)',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            OfficialLetterSheet(
+              email: format == LetterFormatV1561.email,
+              child: Column(children: [
+                TextField(
+                  key: const Key('generated-letter'),
+                  controller: letter,
+                  minLines: format == LetterFormatV1561.email ? 10 : 22,
+                  maxLines: null,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 15,
+                    height: 1.55,
+                  ),
+                  cursorColor: Color(0xFF136DF2),
+                  onChanged: (_) {
+                    if (saved) setState(() => saved = false);
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Votre courrier',
+                    hintStyle: const TextStyle(color: Colors.black54),
+                    suffixIcon: VoiceInputButton(controller: letter),
+                  ),
+                ),
+                if (addSignature && widget.settings.hasSignature) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Image.file(
+                      File(widget.settings.signaturePath),
+                      key: const Key('letter-signature-preview'),
+                      width: 150,
+                      height: 62,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${widget.settings.firstName} ${widget.settings.lastName}'
+                          .trim(),
+                      style: const TextStyle(color: Colors.black, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ]),
+            ),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final action in const [
+                'Corriger',
+                'Raccourcir',
+                'Rendre plus ferme',
+                'Rendre plus courtois',
+                'Simplifier',
+              ])
+                ActionChip(
+                  label: Text(action),
+                  onPressed: loading ? null : () => _transform(action),
+                ),
+              ActionChip(
+                label: const Text('Régénérer'),
+                onPressed: loading ? null : _generate,
+              ),
+            ]),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const Key('save-procedure'),
+              onPressed: saved ? null : _saveProcedure,
+              icon: const Icon(Icons.folder_copy_outlined),
+              label: Text(saved
+                  ? 'Enregistrée dans Mes démarches'
+                  : 'Enregistrer dans Mes démarches'),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _exportPdf,
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Exporter en PDF'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _share,
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Transmettre'),
+                ),
+              ),
+            ]),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            'La lettre reste locale et n’est jamais envoyée automatiquement vers Supabase.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ]),
+      );
+}
+
 class GeminiConfigurationException implements Exception {
   const GeminiConfigurationException(this.message);
   final String message;
@@ -4913,9 +6389,15 @@ extension ReplyIntentInfo on ReplyIntent {
 }
 
 class ReplyScreen extends StatefulWidget {
-  const ReplyScreen({super.key, required this.sourceText, this.insight});
+  const ReplyScreen({
+    super.key,
+    required this.sourceText,
+    this.insight,
+    this.settings,
+  });
   final String sourceText;
   final DocumentInsight? insight;
+  final AppSettings? settings;
   @override
   State<ReplyScreen> createState() => _ReplyScreenState();
 }
@@ -4930,10 +6412,16 @@ class _ReplyScreenState extends State<ReplyScreen> {
   bool _initializingSpeech = true;
   String? _localeId;
   String _spokenPrefix = '';
+  late bool addSignature;
 
   @override
   void initState() {
     super.initState();
+    final settings = widget.settings ?? appSettings;
+    addSignature = LetterSignatureService.defaultForLetter(
+      autoInsert: settings.autoInsertSignature,
+      hasSignature: settings.hasSignature,
+    );
     _initializeSpeech();
   }
 
@@ -5054,22 +6542,15 @@ Cordialement,''';
   }
 
   Future<Uint8List> _buildReplyPdf() async {
-    final document = pw.Document();
-    document.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(40),
-        build: (_) => [
-          pw.Text('AdminFacile - Réponse administrative',
-              style:
-                  pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 24),
-          pw.Text(draft.text.trim(),
-              style: const pw.TextStyle(fontSize: 12, lineSpacing: 4)),
-        ],
-      ),
+    final settings = widget.settings ?? appSettings;
+    return LetterSignatureService.buildLetterPdf(
+      text: draft.text,
+      subject: 'Réponse à votre courrier',
+      heading: 'AdminFacile - Réponse administrative',
+      signed: addSignature && settings.hasSignature,
+      signaturePath: settings.signaturePath,
+      senderName: '${settings.firstName} ${settings.lastName}'.trim(),
     );
-    return document.save();
   }
 
   Future<void> _shareReply({bool email = false}) async {
@@ -5160,6 +6641,12 @@ Cordialement,''';
             label: Text(
               _listening ? 'Arrêter la dictée' : 'Dicter ma réponse',
             ),
+          ),
+          LetterSignatureOption(
+            key: const Key('reply-signature-option'),
+            settings: widget.settings ?? appSettings,
+            value: addSignature,
+            onChanged: (value) => setState(() => addSignature = value),
           ),
           const SizedBox(height: 12),
           const Text('Envoyer ou conserver',
@@ -7049,6 +8536,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
   bool _initializingSpeech = true;
   String? _speechLocaleId;
   String _detailsPrefix = '';
+  late bool addSignature;
 
   @override
   void initState() {
@@ -7059,6 +8547,10 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
     postalCode = TextEditingController(text: widget.settings.postalCode);
     city = TextEditingController(text: widget.settings.city);
     recipient.text = widget.initialRecipient;
+    addSignature = LetterSignatureService.defaultForLetter(
+      autoInsert: widget.settings.autoInsertSignature,
+      hasSignature: widget.settings.hasSignature,
+    );
     _initializeLetterSpeech();
   }
 
@@ -7188,6 +8680,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
         letter: letter,
         createdAt: now,
         updatedAt: now,
+        signed: addSignature && widget.settings.hasSignature,
       ),
     );
     if (!mounted) return;
@@ -7196,6 +8689,8 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
         builder: (_) => LetterPreviewScreen(
           letter: letter,
           defaultSubject: widget.model.subject,
+          settings: widget.settings,
+          initialSigned: addSignature,
         ),
       ),
     );
@@ -7330,6 +8825,12 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                     : 'Le microphone remplit uniquement les détails de cette lettre.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              LetterSignatureOption(
+                key: const Key('template-signature-option'),
+                settings: widget.settings,
+                value: addSignature,
+                onChanged: (value) => setState(() => addSignature = value),
+              ),
               const SizedBox(height: 20),
               FilledButton.icon(
                   onPressed: generate,
@@ -7459,17 +8960,35 @@ class LetterPreviewScreen extends StatefulWidget {
     super.key,
     required this.letter,
     this.defaultSubject = 'Courrier administratif',
+    this.settings,
+    this.initialSigned,
+    this.onSignedChanged,
   });
   final String letter;
   final String defaultSubject;
+  final AppSettings? settings;
+  final bool? initialSigned;
+  final ValueChanged<bool>? onSignedChanged;
   @override
   State<LetterPreviewScreen> createState() => _LetterPreviewScreenState();
 }
 
 class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
   bool improving = false;
+  late bool addSignature;
   late final TextEditingController controller =
       TextEditingController(text: widget.letter);
+
+  @override
+  void initState() {
+    super.initState();
+    addSignature = widget.initialSigned ??
+        (widget.settings == null
+            ? false
+            : LetterSignatureService.defaultForLetter(
+                autoInsert: widget.settings!.autoInsertSignature,
+                hasSignature: widget.settings!.hasSignature));
+  }
 
   Future<void> _improveWithGemini() async {
     var tone = 'Professionnel';
@@ -7534,16 +9053,16 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
   }
 
   Future<Uint8List> _buildPdf() async {
-    final pdf = pw.Document();
-    pdf.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(42),
-      build: (_) => [
-        pw.Text(controller.text,
-            style: const pw.TextStyle(fontSize: 12, lineSpacing: 4))
-      ],
-    ));
-    return pdf.save();
+    final settings = widget.settings;
+    return LetterSignatureService.buildLetterPdf(
+      text: controller.text,
+      subject: widget.defaultSubject,
+      signed: addSignature && (settings?.hasSignature ?? false),
+      signaturePath: settings?.signaturePath ?? '',
+      senderName: settings == null
+          ? ''
+          : '${settings.firstName} ${settings.lastName}'.trim(),
+    );
   }
 
   Future<File> _temporaryPdf() async {
@@ -7624,20 +9143,59 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
           ],
         ),
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
-              controller: controller,
-              expands: true,
-              minLines: null,
-              maxLines: null,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                labelText: 'Document modifiable',
-                alignLabelWithHint: true,
-                helperText:
-                    'Vous pouvez corriger la lettre avant de l’enregistrer, l’envoyer ou l’imprimer.',
-              ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: OfficialLetterSheet(
+              child: Column(children: [
+                TextField(
+                  key: const Key('letter-preview-editor'),
+                  controller: controller,
+                  minLines: 28,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  textAlignVertical: TextAlignVertical.top,
+                  cursorColor: const Color(0xFF136DF2),
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 15,
+                    height: 1.6,
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: 'Document modifiable',
+                    hintStyle: TextStyle(color: Colors.black54),
+                  ),
+                ),
+                if (widget.settings != null)
+                  LetterSignatureOption(
+                    key: const Key('preview-signature-option'),
+                    settings: widget.settings!,
+                    value: addSignature,
+                    onChanged: (value) {
+                      setState(() => addSignature = value);
+                      widget.onSignedChanged?.call(value);
+                    },
+                  ),
+                if (addSignature &&
+                    (widget.settings?.hasSignature ?? false)) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Image.file(File(widget.settings!.signaturePath),
+                        key: const Key('preview-signature-image'),
+                        width: 150,
+                        height: 62,
+                        fit: BoxFit.contain),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${widget.settings!.firstName} ${widget.settings!.lastName}'
+                          .trim(),
+                      style: const TextStyle(color: Colors.black, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ]),
             ),
           ),
         ),
@@ -7725,6 +9283,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
 
   final Set<String> _uploadingProcedureIds = <String>{};
   final Set<String> _syncedProcedureIds = <String>{};
+  final Set<String> _failedProcedureIds = <String>{};
 
   @override
   void initState() {
@@ -7792,43 +9351,20 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
     if (_uploadingProcedureIds.contains(item.id)) return;
 
     setState(() => _uploadingProcedureIds.add(item.id));
+    _failedProcedureIds.remove(item.id);
 
     try {
-      final pdf = pw.Document();
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(38),
-          build: (_) => [
-            pw.Text(
-              item.title,
-              style: pw.TextStyle(
-                fontSize: 20,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Text(
-              item.organisation.isEmpty ? item.category : item.organisation,
-            ),
-            pw.SizedBox(height: 18),
-            pw.Text(item.letter),
-            if (item.notes.trim().isNotEmpty) ...[
-              pw.SizedBox(height: 20),
-              pw.Divider(),
-              pw.Text(
-                'Notes personnelles',
-                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-              ),
-              pw.SizedBox(height: 6),
-              pw.Text(item.notes.trim()),
-            ],
-          ],
-        ),
+      final prefs = await SharedPreferences.getInstance();
+      final signaturePath = prefs.getString('signaturePathV17') ?? '';
+      final bytes = await LetterSignatureService.buildLetterPdf(
+        text: item.letter,
+        subject: item.title,
+        heading: item.organisation.isEmpty ? item.category : item.organisation,
+        signed: item.signed,
+        signaturePath: signaturePath,
+        senderName: '${appSettings.firstName} ${appSettings.lastName}'.trim(),
+        notes: item.notes,
       );
-
-      final bytes = await pdf.save();
       final cloudPath = procedureCloudPath(user.id, item.id);
 
       await client.storage.from('admin-documents').uploadBinary(
@@ -7843,6 +9379,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       if (!mounted) return;
 
       setState(() => _syncedProcedureIds.add(item.id));
+      _failedProcedureIds.remove(item.id);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -7855,6 +9392,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       debugPrint('Envoi Supabase impossible : $error\n$stackTrace');
 
       if (!mounted) return;
+
+      setState(() => _failedProcedureIds.add(item.id));
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Sauvegarde impossible : $error')),
@@ -8207,6 +9746,11 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                         builder: (_) => LetterPreviewScreen(
                                           letter: item.letter,
                                           defaultSubject: item.title,
+                                          settings: appSettings,
+                                          initialSigned: item.signed,
+                                          onSignedChanged: (value) =>
+                                              widget.store.update(
+                                                  item.copyWith(signed: value)),
                                         ),
                                       ),
                                     );
@@ -8235,13 +9779,21 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                         ),
                                       )
                                     : Icon(
-                                        _syncedProcedureIds.contains(item.id)
-                                            ? Icons.cloud_done_rounded
-                                            : Icons.cloud_upload_outlined,
+                                        _failedProcedureIds.contains(item.id)
+                                            ? Icons.error_outline
+                                            : _syncedProcedureIds
+                                                    .contains(item.id)
+                                                ? Icons.cloud_done_rounded
+                                                : Icons.cloud_upload_outlined,
                                         color: _syncedProcedureIds
                                                 .contains(item.id)
                                             ? Colors.green
-                                            : null,
+                                            : _failedProcedureIds
+                                                    .contains(item.id)
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .error
+                                                : null,
                                       ),
                               ),
                               const SizedBox(width: 8),
@@ -8275,6 +9827,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String category = 'Tous';
   String quickFilter = 'Tous';
   String sortMode = 'Plus récents';
+  final Set<String> _uploadingDocumentIds = <String>{};
+  final Set<String> _syncedDocumentIds = <String>{};
+  final Set<String> _failedDocumentIds = <String>{};
 
   static const statuses = ['À traiter', 'En cours', 'Terminé', 'Archivé'];
   static const priorities = ['Urgent', 'Important', 'Information'];
@@ -8344,9 +9899,81 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               'Le fichier PDF n’est plus disponible, mais le texte archivé reste accessible.')));
       return;
     }
-    await Printing.layoutPdf(
-        onLayout: (_) async => File(doc.filePath!).readAsBytes(),
-        name: doc.title);
+    final path = doc.filePath!;
+    final lower = path.toLowerCase();
+    final isImage = lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg');
+    final bytes = await File(path).readAsBytes();
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => InternalDocumentPreviewScreen(
+        bytes: bytes,
+        title: doc.title,
+        isImage: isImage,
+      ),
+    ));
+  }
+
+  Future<void> _uploadDocument(SavedDocument doc) async {
+    final user = _currentSupabaseUser;
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:
+            const Text('Connectez-vous dans Profil pour utiliser le cloud.'),
+        action: SnackBarAction(
+          label: 'Ouvrir le Profil',
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ProfileScreen(settings: appSettings))),
+        ),
+      ));
+      return;
+    }
+    setState(() {
+      _uploadingDocumentIds.add(doc.id);
+      _failedDocumentIds.remove(doc.id);
+    });
+    try {
+      Uint8List bytes;
+      var extension = 'pdf';
+      var contentType = 'application/pdf';
+      if (doc.filePath != null && await File(doc.filePath!).exists()) {
+        bytes = await File(doc.filePath!).readAsBytes();
+        final lower = doc.filePath!.toLowerCase();
+        if (lower.endsWith('.png')) {
+          extension = 'png';
+          contentType = 'image/png';
+        } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+          extension = 'jpg';
+          contentType = 'image/jpeg';
+        }
+      } else {
+        bytes = await LetterSignatureService.buildLetterPdf(
+          text: doc.extractedText.isEmpty
+              ? 'Document sans contenu textuel.'
+              : doc.extractedText,
+          subject: doc.title,
+          signed: false,
+        );
+      }
+      await Supabase.instance.client.storage
+          .from('admin-documents')
+          .uploadBinary(
+            '${user.id}/documents/${doc.id}.$extension',
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: true),
+          );
+      if (mounted) setState(() => _syncedDocumentIds.add(doc.id));
+    } catch (error) {
+      if (mounted) {
+        setState(() => _failedDocumentIds.add(doc.id));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Envoi cloud impossible : $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingDocumentIds.remove(doc.id));
+    }
   }
 
   Future<void> _editDocument(SavedDocument doc) async {
@@ -8764,6 +10391,44 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           icon:
                                               const Icon(Icons.share_outlined)),
                                     IconButton.filledTonal(
+                                      key: Key('document-cloud-${doc.id}'),
+                                      tooltip: _failedDocumentIds
+                                              .contains(doc.id)
+                                          ? 'Échec - réessayer'
+                                          : _syncedDocumentIds.contains(doc.id)
+                                              ? 'Synchronisé'
+                                              : 'Envoyer dans le cloud',
+                                      onPressed:
+                                          _uploadingDocumentIds.contains(doc.id)
+                                              ? null
+                                              : () => _uploadDocument(doc),
+                                      icon: _uploadingDocumentIds
+                                              .contains(doc.id)
+                                          ? const SizedBox.square(
+                                              dimension: 20,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2))
+                                          : Icon(
+                                              _failedDocumentIds
+                                                      .contains(doc.id)
+                                                  ? Icons.error_outline
+                                                  : _syncedDocumentIds
+                                                          .contains(doc.id)
+                                                      ? Icons.cloud_done_rounded
+                                                      : Icons
+                                                          .cloud_upload_outlined,
+                                              color: _syncedDocumentIds
+                                                      .contains(doc.id)
+                                                  ? Colors.green
+                                                  : _failedDocumentIds
+                                                          .contains(doc.id)
+                                                      ? Theme.of(context)
+                                                          .colorScheme
+                                                          .error
+                                                      : null,
+                                            ),
+                                    ),
+                                    IconButton.filledTonal(
                                         tooltip: 'Supprimer',
                                         onPressed: () =>
                                             widget.documentStore.remove(doc.id),
@@ -8952,6 +10617,88 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _storeSignature(Uint8List bytes) async {
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw const FileSystemException(
+          'La signature dépasse la taille maximale de 5 Mo.');
+    }
+    await widget.settings.saveSignatureBytes(bytes);
+    final user = _currentSupabaseUser;
+    if (_supabaseReady && user != null) {
+      await Supabase.instance.client.storage
+          .from('admin-documents')
+          .uploadBinary(
+            '${user.id}/profile/signature.png',
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/png',
+            ),
+          );
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _drawSignature() async {
+    final bytes = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(builder: (_) => const SignaturePadScreen()),
+    );
+    if (bytes == null || !mounted) return;
+    try {
+      await _storeSignature(bytes);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Signature non enregistrée : $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _importSignature() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg'],
+      withData: true,
+    );
+    final picked = result?.files.single;
+    if (picked == null || !mounted) return;
+    final extension = picked.extension?.toLowerCase();
+    if (!const {'png', 'jpg', 'jpeg'}.contains(extension)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Choisissez une image PNG, JPG ou JPEG.'),
+      ));
+      return;
+    }
+    final bytes = picked.bytes ??
+        (picked.path == null ? null : await File(picked.path!).readAsBytes());
+    if (bytes == null) return;
+    try {
+      await _storeSignature(bytes);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import impossible : $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeSignature() async {
+    final user = _currentSupabaseUser;
+    await widget.settings.removeSignature();
+    if (_supabaseReady && user != null) {
+      try {
+        await Supabase.instance.client.storage
+            .from('admin-documents')
+            .remove(['${user.id}/profile/signature.png']);
+      } catch (_) {
+        // La copie locale est supprimée même si le réseau est indisponible.
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = _currentSupabaseUser;
@@ -9073,6 +10820,71 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            key: const Key('profile-signature-section'),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(children: [
+                    Icon(Icons.draw_outlined),
+                    SizedBox(width: 10),
+                    Text('Ma signature',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w800)),
+                  ]),
+                  const SizedBox(height: 10),
+                  if (widget.settings.hasSignature) ...[
+                    Container(
+                      key: const Key('signature-preview'),
+                      height: 90,
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.black12),
+                      ),
+                      child: Image.file(File(widget.settings.signaturePath),
+                          fit: BoxFit.contain),
+                    ),
+                    SwitchListTile(
+                      key: const Key('auto-signature-switch'),
+                      contentPadding: EdgeInsets.zero,
+                      value: widget.settings.autoInsertSignature,
+                      onChanged: widget.settings.setAutoInsertSignature,
+                      title: const Text(
+                          'Insérer automatiquement ma signature dans les lettres'),
+                    ),
+                  ] else
+                    const Text('Aucune signature enregistrée.'),
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    FilledButton.tonalIcon(
+                      key: const Key('draw-signature'),
+                      onPressed: _drawSignature,
+                      icon: const Icon(Icons.gesture_rounded),
+                      label: const Text('Dessiner ma signature'),
+                    ),
+                    OutlinedButton.icon(
+                      key: const Key('import-signature'),
+                      onPressed: _importSignature,
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('Importer une image'),
+                    ),
+                    if (widget.settings.hasSignature)
+                      TextButton.icon(
+                        onPressed: _removeSignature,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Supprimer'),
+                      ),
+                  ]),
                 ],
               ),
             ),
