@@ -47,27 +47,30 @@ class _SignaturePadScreenState extends State<SignaturePadScreen> {
               const Text('Signez avec votre doigt dans la zone blanche.'),
               const SizedBox(height: 12),
               Expanded(
-                child: RepaintBoundary(
-                  key: _boundaryKey,
-                  child: Container(
-                    key: const Key('signature-drawing-area'),
-                    color: Colors.transparent,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        border: Border.all(color: Colors.black26),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onPanStart: (details) =>
-                            setState(() => _points.add(details.localPosition)),
-                        onPanUpdate: (details) =>
-                            setState(() => _points.add(details.localPosition)),
-                        onPanEnd: (_) => setState(() => _points.add(null)),
-                        child: CustomPaint(
-                          painter: SignaturePainter(_points),
-                          size: Size.infinite,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.black26),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: RepaintBoundary(
+                      key: _boundaryKey,
+                      child: Container(
+                        key: const Key('signature-drawing-area'),
+                        color: Colors.transparent,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanStart: (details) => setState(
+                              () => _points.add(details.localPosition)),
+                          onPanUpdate: (details) => setState(
+                              () => _points.add(details.localPosition)),
+                          onPanEnd: (_) => setState(() => _points.add(null)),
+                          child: CustomPaint(
+                            painter: SignaturePainter(_points),
+                            size: Size.infinite,
+                          ),
                         ),
                       ),
                     ),

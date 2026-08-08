@@ -8071,6 +8071,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                 ),
                               ),
                               PopupMenuButton<String>(
+                                tooltip: 'Plus d’actions',
+                                icon: const Icon(Icons.more_horiz_rounded),
                                 onSelected: (value) async {
                                   if (value == 'edit') await _edit(item);
                                   if (value == 'archive') {
@@ -9244,6 +9246,8 @@ class _CloudSpaceScreenState extends State<CloudSpaceScreen> {
                         maxLines: 2, overflow: TextOverflow.ellipsis),
                     subtitle: Text(_size(document.size)),
                     trailing: PopupMenuButton<String>(
+                      tooltip: 'Plus d’actions',
+                      icon: const Icon(Icons.more_horiz_rounded),
                       onSelected: (action) async {
                         try {
                           if (action == 'download') {

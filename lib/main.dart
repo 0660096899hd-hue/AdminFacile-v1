@@ -4,11 +4,9 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_doc_scanner/flutter_doc_scanner.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
@@ -21,6 +19,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'widgets/voice_input_button.dart';
 import 'signature_pad.dart';
 import 'letter_signature_service.dart';
+import 'signature_image_service.dart';
+import 'scanner_processing_service.dart';
+import 'document_scanner_service.dart';
+import 'professional_auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const String _defaultSupabaseUrl = 'https://pmnjphgaxcmxmhurhucm.supabase.co';
@@ -41,6 +43,8 @@ bool get _supabaseConfigured =>
     _supabaseUrl.trim().isNotEmpty && _supabasePublishableKey.trim().isNotEmpty;
 
 bool _supabaseReady = false;
+String? _supabaseInitializationError;
+ProfessionalAuthService? _authService;
 late AppSettings appSettings;
 
 User? get _currentSupabaseUser =>
@@ -231,6 +235,14 @@ class SavedDocument {
     this.status = 'À traiter',
     this.priority = 'Information',
     this.notes = '',
+    this.detectedDocumentType = 'Document inconnu',
+    this.detectedAmount = '',
+    this.detectedDueDate = '',
+    this.detectedReference = '',
+    this.detectedOrganisation = '',
+    this.detectedPriority = 'À vérifier',
+    this.analysisConfidence = 0.0,
+    this.userCorrectedAnalysis = false,
   });
 
   final String id;
@@ -245,6 +257,14 @@ class SavedDocument {
   final String status;
   final String priority;
   final String notes;
+  final String detectedDocumentType;
+  final String detectedAmount;
+  final String detectedDueDate;
+  final String detectedReference;
+  final String detectedOrganisation;
+  final String detectedPriority;
+  final double analysisConfidence;
+  final bool userCorrectedAnalysis;
 
   SavedDocument copyWith({
     String? title,
@@ -255,6 +275,14 @@ class SavedDocument {
     String? status,
     String? priority,
     String? notes,
+    String? detectedDocumentType,
+    String? detectedAmount,
+    String? detectedDueDate,
+    String? detectedReference,
+    String? detectedOrganisation,
+    String? detectedPriority,
+    double? analysisConfidence,
+    bool? userCorrectedAnalysis,
   }) =>
       SavedDocument(
         id: id,
@@ -269,6 +297,15 @@ class SavedDocument {
         status: status ?? this.status,
         priority: priority ?? this.priority,
         notes: notes ?? this.notes,
+        detectedDocumentType: detectedDocumentType ?? this.detectedDocumentType,
+        detectedAmount: detectedAmount ?? this.detectedAmount,
+        detectedDueDate: detectedDueDate ?? this.detectedDueDate,
+        detectedReference: detectedReference ?? this.detectedReference,
+        detectedOrganisation: detectedOrganisation ?? this.detectedOrganisation,
+        detectedPriority: detectedPriority ?? this.detectedPriority,
+        analysisConfidence: analysisConfidence ?? this.analysisConfidence,
+        userCorrectedAnalysis:
+            userCorrectedAnalysis ?? this.userCorrectedAnalysis,
       );
 
   Map<String, dynamic> toJson() => {
@@ -284,6 +321,14 @@ class SavedDocument {
         'status': status,
         'priority': priority,
         'notes': notes,
+        'detectedDocumentType': detectedDocumentType,
+        'detectedAmount': detectedAmount,
+        'detectedDueDate': detectedDueDate,
+        'detectedReference': detectedReference,
+        'detectedOrganisation': detectedOrganisation,
+        'detectedPriority': detectedPriority,
+        'analysisConfidence': analysisConfidence,
+        'userCorrectedAnalysis': userCorrectedAnalysis,
       };
 
   factory SavedDocument.fromJson(Map<String, dynamic> json) => SavedDocument(
@@ -300,6 +345,18 @@ class SavedDocument {
         status: json['status'] as String? ?? 'À traiter',
         priority: json['priority'] as String? ?? 'Information',
         notes: json['notes'] as String? ?? '',
+        detectedDocumentType:
+            json['detectedDocumentType'] as String? ?? 'Document inconnu',
+        detectedAmount: json['detectedAmount'] as String? ?? '',
+        detectedDueDate: json['detectedDueDate'] as String? ?? '',
+        detectedReference: json['detectedReference'] as String? ?? '',
+        detectedOrganisation: json['detectedOrganisation'] as String? ??
+            json['organisation'] as String? ??
+            '',
+        detectedPriority: json['detectedPriority'] as String? ?? 'À vérifier',
+        analysisConfidence:
+            (json['analysisConfidence'] as num?)?.toDouble() ?? 0.0,
+        userCorrectedAnalysis: json['userCorrectedAnalysis'] as bool? ?? false,
       );
 }
 
@@ -364,11 +421,24 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (_supabaseConfigured) {
-    await Supabase.initialize(
-      url: _supabaseUrl,
-      publishableKey: _supabasePublishableKey,
-    );
-    _supabaseReady = true;
+    try {
+      await Supabase.initialize(
+        url: _supabaseUrl,
+        publishableKey: _supabasePublishableKey,
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+          autoRefreshToken: true,
+          detectSessionInUri: true,
+        ),
+      );
+      _supabaseReady = true;
+      _authService = ProfessionalAuthService(
+        SupabaseAuthGateway(Supabase.instance.client),
+      );
+    } catch (error, stackTrace) {
+      _supabaseInitializationError = error.toString();
+      debugPrint('Supabase.initialize a échoué : $error\n$stackTrace');
+    }
   }
 
   final settings = AppSettings();
@@ -377,6 +447,24 @@ Future<void> main() async {
   final procedureStore = appProcedureStore;
 
   await settings.load();
+  if (settings.signatureMigratedOnLoad &&
+      settings.hasSignature &&
+      _currentSupabaseUser != null) {
+    try {
+      await Supabase.instance.client.storage
+          .from('admin-documents')
+          .uploadBinary(
+            '${_currentSupabaseUser!.id}/profile/signature.png',
+            await File(settings.signaturePath).readAsBytes(),
+            fileOptions: const FileOptions(
+              upsert: true,
+              contentType: 'image/png',
+            ),
+          );
+    } catch (error) {
+      debugPrint('Synchronisation de la signature migrée impossible : $error');
+    }
+  }
   await documentStore.load();
   await procedureStore.load();
 
@@ -417,6 +505,7 @@ class AppSettings extends ChangeNotifier {
   bool comfortMode = false;
   String signaturePath = '';
   bool autoInsertSignature = false;
+  bool signatureMigratedOnLoad = false;
   AppThemePreference themePreference = AppThemePreference.dark;
 
   String get greeting {
@@ -445,6 +534,7 @@ class AppSettings extends ChangeNotifier {
       (value) => value.name == savedTheme,
       orElse: () => AppThemePreference.dark,
     );
+    signatureMigratedOnLoad = await _migrateSignatureIfNeeded();
   }
 
   Future<void> saveProfile(Map<String, String> values) async {
@@ -475,12 +565,44 @@ class AppSettings extends ChangeNotifier {
   Future<void> saveSignatureBytes(Uint8List bytes,
       {Directory? directory}) async {
     directory ??= await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/adminfacile_signature.png');
-    await file.writeAsBytes(bytes, flush: true);
+    final normalized =
+        await SignatureImageService.normalizeSignatureToTransparentPng(bytes);
+    final file = File('${directory.path}/adminfacile_signature_v1735.png');
+    await file.writeAsBytes(normalized, flush: true);
     signaturePath = file.path;
     final prefs = _prefs ??= await SharedPreferences.getInstance();
     await prefs.setString('signaturePathV17', signaturePath);
+    await prefs.setBool('signatureTransparentPngV1735', true);
     notifyListeners();
+  }
+
+  Future<bool> _migrateSignatureIfNeeded() async {
+    if (signaturePath.isEmpty ||
+        (_prefs?.getBool('signatureTransparentPngV1735') ?? false)) {
+      return false;
+    }
+    final legacyFile = File(signaturePath);
+    if (!await legacyFile.exists()) return false;
+    try {
+      final normalized =
+          await SignatureImageService.normalizeSignatureToTransparentPng(
+        await legacyFile.readAsBytes(),
+      );
+      final directory = legacyFile.parent;
+      final migrated =
+          File('${directory.path}/adminfacile_signature_v1735.png');
+      await migrated.writeAsBytes(normalized, flush: true);
+      signaturePath = migrated.path;
+      await _prefs!.setString('signaturePathV17', signaturePath);
+      await _prefs!.setBool('signatureTransparentPngV1735', true);
+      // L’ancien fichier est volontairement conservé : aucune donnée n’est
+      // supprimée pendant la migration.
+      return true;
+    } catch (_) {
+      // L'image brute n'est plus utilisée dans les PDF après un échec.
+      signaturePath = '';
+      return false;
+    }
   }
 
   Future<void> removeSignature() async {
@@ -490,6 +612,9 @@ class AppSettings extends ChangeNotifier {
     autoInsertSignature = false;
     final prefs = _prefs ??= await SharedPreferences.getInstance();
     await prefs.remove('signaturePathV17');
+    await prefs.remove('signatureTransparentPngV1733');
+    await prefs.remove('signatureTransparentPngV1734');
+    await prefs.remove('signatureTransparentPngV1735');
     await prefs.setBool('autoInsertSignatureV17', false);
     notifyListeners();
   }
@@ -765,6 +890,9 @@ class _AppShellState extends State<AppShell> {
         (_) {
           if (mounted) setState(() {});
         },
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('onAuthStateChange a échoué : $error\n$stackTrace');
+        },
       );
     }
   }
@@ -1026,6 +1154,27 @@ class _AdminDrawer extends StatelessWidget {
                   selected: selectedIndex == 4,
                   onTap: () => onSelect(4)),
             ])),
+        _DrawerEntry(
+          key: const Key('drawer-premium-entry'),
+          icon: Icons.workspace_premium_rounded,
+          iconColor: const Color(0xFFB8860B),
+          label: 'Version Premium',
+          subtitle: 'Débloquer toutes les fonctionnalités',
+          onTap: () => showDialog<void>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Version Premium'),
+              content:
+                  const Text('La version Premium sera bientôt disponible.'),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Fermer'),
+                ),
+              ],
+            ),
+          ),
+        ),
         Padding(
             padding: const EdgeInsets.all(18),
             child: Row(children: [
@@ -1042,12 +1191,17 @@ class _AdminDrawer extends StatelessWidget {
 
 class _DrawerEntry extends StatelessWidget {
   const _DrawerEntry(
-      {required this.icon,
+      {super.key,
+      required this.icon,
       required this.label,
       required this.onTap,
+      this.subtitle,
+      this.iconColor,
       this.selected = false});
   final IconData icon;
   final String label;
+  final String? subtitle;
+  final Color? iconColor;
   final VoidCallback onTap;
   final bool selected;
   @override
@@ -1058,12 +1212,16 @@ class _DrawerEntry extends StatelessWidget {
         selectedTileColor: const Color(0xFF2588FF).withValues(alpha: .14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         leading: Icon(icon,
-            color: selected
-                ? const Color(0xFF2588FF)
-                : Theme.of(context).colorScheme.onSurfaceVariant),
+            color: iconColor ??
+                (selected
+                    ? const Color(0xFF2588FF)
+                    : Theme.of(context).colorScheme.onSurfaceVariant)),
         title: Text(label,
             style: TextStyle(
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w600)),
+        subtitle: subtitle == null
+            ? null
+            : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: const Icon(Icons.chevron_right_rounded, size: 20),
         onTap: onTap,
       ));
@@ -1074,10 +1232,12 @@ class GlobalSearchScreen extends StatefulWidget {
       {super.key,
       required this.documentStore,
       required this.procedureStore,
-      required this.settings});
+      required this.settings,
+      this.initialModels});
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
   final AppSettings settings;
+  final List<JsonLetterRecord>? initialModels;
   @override
   State<GlobalSearchScreen> createState() => _GlobalSearchScreenState();
 }
@@ -1085,6 +1245,44 @@ class GlobalSearchScreen extends StatefulWidget {
 class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
   final controller = TextEditingController();
   String query = '';
+  List<JsonLetterRecord> models = const [];
+  final Set<String> favoriteModelIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialModels != null) {
+      models = widget.initialModels!;
+      _loadFavoriteIds();
+    } else {
+      _loadModels();
+    }
+  }
+
+  Future<void> _loadFavoriteIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => favoriteModelIds.addAll(
+        prefs.getStringList('jsonLibraryFavoritesV66') ?? const <String>[]));
+  }
+
+  Future<void> _loadModels() async {
+    final raw = await rootBundle.loadString('assets/letters/library.json');
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    final loaded = (data['templates'] as List<dynamic>)
+        .map((e) =>
+            JsonLetterRecord.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList()
+      ..addAll(V173LetterCatalog.additionalRecords);
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      models = loaded;
+      favoriteModelIds.addAll(
+          prefs.getStringList('jsonLibraryFavoritesV66') ?? const <String>[]);
+    });
+  }
+
   @override
   void dispose() {
     controller.dispose();
@@ -1107,6 +1305,12 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             .where((e) => matches(
                 '${e.title} ${e.organisation} ${e.category} ${e.extractedText}'))
             .toList();
+    final modelResults = query.trim().isEmpty
+        ? <JsonLetterRecord>[]
+        : V173LetterCatalog.search(models, query);
+    final favoriteResults = modelResults
+        .where((model) => favoriteModelIds.contains(model.id))
+        .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Recherche globale')),
       body: SafeArea(
@@ -1132,16 +1336,47 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
               title: 'Recherchez partout',
               subtitle:
                   'Retrouvez vos démarches et vos documents depuis un seul écran.'),
-        if (query.trim().isNotEmpty && procedures.isEmpty && documents.isEmpty)
+        if (query.trim().isNotEmpty &&
+            procedures.isEmpty &&
+            documents.isEmpty &&
+            modelResults.isEmpty)
           const _SearchEmptyState(
               title: 'Aucun résultat',
               subtitle:
                   'Essayez un organisme, un sujet ou un mot présent dans le document.'),
-        if (procedures.isNotEmpty) ...[
-          Text('Démarches (${procedures.length})',
+        if (modelResults.isNotEmpty) ...[
+          Text('Modèles de lettres (${modelResults.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
-          ...procedures.map((e) => Card(
+          ...modelResults.take(4).map((model) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: Text(model.title),
+                  subtitle: Text('${model.category} • ${model.description}',
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => LetterModelDetailScreen(
+                          settings: widget.settings, record: model))),
+                ),
+              )),
+          if (modelResults.length > 4)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) =>
+                        JsonLibraryScreen(settings: widget.settings))),
+                child: const Text('Voir tout'),
+              ),
+            ),
+          const SizedBox(height: 16),
+        ],
+        if (procedures.isNotEmpty) ...[
+          Text('Mes démarches (${procedures.length})',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          ...procedures.take(4).map((e) => Card(
               child: ListTile(
                   leading: Icon(e.status.icon, color: const Color(0xFF2588FF)),
                   title: Text(e.title),
@@ -1153,10 +1388,10 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
           const SizedBox(height: 16),
         ],
         if (documents.isNotEmpty) ...[
-          Text('Documents (${documents.length})',
+          Text('Mes documents (${documents.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
-          ...documents.map((e) => Card(
+          ...documents.take(4).map((e) => Card(
               child: ListTile(
                   leading: const Icon(Icons.description_rounded,
                       color: Color(0xFF20B98B)),
@@ -1167,7 +1402,24 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                       builder: (_) => DocumentsScreen(
                           documentStore: widget.documentStore)))))),
         ],
-        if (query.trim().isNotEmpty) ...[
+        if (favoriteResults.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text('Favoris (${favoriteResults.length})',
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          ...favoriteResults.take(4).map((model) => Card(
+                child: ListTile(
+                  leading:
+                      const Icon(Icons.star_rounded, color: Color(0xFFFFAD1F)),
+                  title: Text(model.title),
+                  subtitle: Text(model.category),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => LetterModelDetailScreen(
+                          settings: widget.settings, record: model))),
+                ),
+              )),
+        ],
+        if (query.trim().isNotEmpty && modelResults.isEmpty) ...[
           const SizedBox(height: 18),
           FilledButton.icon(
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
@@ -1843,7 +2095,10 @@ class LegacyHomeScreen extends StatelessWidget {
                       openProfile: openProfile,
                       notificationCount: reminders),
                   const SizedBox(height: 20),
-                  _DarkHeroCard(onScan: openScanner, onWrite: openAiWriter),
+                  _DarkHeroCard(
+                      onScan: openScanner,
+                      onWrite: openAiWriter,
+                      onUseModel: openSearch),
                   const SizedBox(height: 18),
                   _ShortcutGrid(
                       activeCount: active.length,
@@ -1949,6 +2204,15 @@ class _DarkHeader extends StatelessWidget {
           ]),
         ),
         const SizedBox(width: 6),
+        Tooltip(
+          message: 'Rechercher',
+          child: _HeaderCircle(
+            key: const Key('dashboard-global-search'),
+            icon: Icons.search_rounded,
+            onTap: openSearch,
+          ),
+        ),
+        const SizedBox(width: 6),
         Stack(clipBehavior: Clip.none, children: [
           _HeaderCircle(
               icon: Icons.notifications_none_rounded, onTap: openSearch),
@@ -2019,9 +2283,45 @@ class _HeaderCircle extends StatelessWidget {
 }
 
 class _DarkHeroCard extends StatelessWidget {
-  const _DarkHeroCard({required this.onScan, required this.onWrite});
+  const _DarkHeroCard(
+      {required this.onScan, required this.onWrite, required this.onUseModel});
   final VoidCallback onScan;
   final VoidCallback onWrite;
+  final VoidCallback onUseModel;
+
+  Future<void> _chooseLetterMethod(BuildContext context) async {
+    final method = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Choisissez une méthode',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 14),
+            ListTile(
+              key: const Key('letter-method-gemini'),
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: const Text('Générer avec Gemini'),
+              onTap: () => Navigator.pop(context, 'gemini'),
+            ),
+            ListTile(
+              key: const Key('letter-method-model'),
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('Utiliser un modèle'),
+              onTap: () => Navigator.pop(context, 'model'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (method == 'gemini') {
+      onWrite();
+    } else if (method == 'model') {
+      onUseModel();
+    }
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, c) {
@@ -2111,7 +2411,7 @@ class _DarkHeroCard extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                       ),
-                      onPressed: onWrite,
+                      onPressed: () => _chooseLetterMethod(context),
                       icon: const Icon(Icons.edit_note_rounded),
                       label: const Text('Créer une lettre',
                           style: TextStyle(fontWeight: FontWeight.w800)),
@@ -2194,11 +2494,6 @@ class _ShortcutGrid extends StatelessWidget {
               label: 'Assistant\nadministratif',
               accent: const Color(0xFF2388FF),
               onTap: openProblem),
-          _DarkShortcut(
-              icon: Icons.menu_book_rounded,
-              label: 'Bibliothèque\nde modèles',
-              accent: const Color(0xFF20D09B),
-              onTap: openSearch),
           _DarkShortcut(
               icon: Icons.folder_rounded,
               label: 'Mes\ndémarches',
@@ -2463,26 +2758,42 @@ class _DarkStat extends StatelessWidget {
   final String label;
   final Color accent;
   @override
-  Widget build(BuildContext context) => Container(
-      constraints: const BoxConstraints(minHeight: 82),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 12),
-      decoration: BoxDecoration(
-          color: const Color(0xFF0C203A),
-          borderRadius: BorderRadius.circular(15)),
-      child: Row(children: [
-        Icon(icon, color: accent, size: 28),
-        const SizedBox(width: 8),
-        Text('$value',
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 25,
-                fontWeight: FontWeight.w900)),
-        const SizedBox(width: 6),
-        Expanded(
-            child: Text(label,
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 10.5, height: 1.18)))
-      ]));
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 100;
+          final valueWidget = Text('$value',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 25,
+                  fontWeight: FontWeight.w900));
+          final labelWidget = Text(label,
+              textAlign: compact ? TextAlign.center : TextAlign.start,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 10.5, height: 1.18));
+          return Container(
+            constraints: const BoxConstraints(minHeight: 82),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 12),
+            decoration: BoxDecoration(
+                color: const Color(0xFF0C203A),
+                borderRadius: BorderRadius.circular(15)),
+            child: compact
+                ? Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(icon, color: accent, size: 24),
+                    const SizedBox(height: 4),
+                    valueWidget,
+                    const SizedBox(height: 3),
+                    labelWidget,
+                  ])
+                : Row(children: [
+                    Icon(icon, color: accent, size: 28),
+                    const SizedBox(width: 8),
+                    valueWidget,
+                    const SizedBox(width: 6),
+                    Expanded(child: labelWidget),
+                  ]),
+          );
+        },
+      );
 }
 
 class _SmallDarkAction extends StatelessWidget {
@@ -2492,16 +2803,38 @@ class _SmallDarkAction extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => OutlinedButton.icon(
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFFD7E5F8),
-          side: const BorderSide(color: Color(0xFF24456F)),
-          padding: const EdgeInsets.symmetric(vertical: 13),
+  Widget build(BuildContext context) {
+    final light = Theme.of(context).brightness == Brightness.light;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: light
+            ? const [
+                BoxShadow(
+                    color: Color(0x180A4A8A),
+                    blurRadius: 8,
+                    offset: Offset(0, 3))
+              ]
+            : null,
+      ),
+      child: OutlinedButton.icon(
+        key: Key('dashboard-small-action-$label'),
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: light ? Colors.white : Colors.transparent,
+          foregroundColor:
+              light ? const Color(0xFF0A3A70) : const Color(0xFFD7E5F8),
+          side: BorderSide(
+              color: light ? const Color(0xFF8EC5FF) : const Color(0xFF24456F)),
+          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 6),
           shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-      icon: Icon(icon, size: 18),
-      label: FittedBox(child: Text(label)));
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        icon: Icon(icon, size: 18),
+        label: FittedBox(child: Text(label)),
+      ),
+    );
+  }
 }
 
 class PrivacyCard extends StatefulWidget {
@@ -2556,8 +2889,8 @@ class _PrivacyCardState extends State<PrivacyCard> {
             if (expanded) ...[
               const SizedBox(height: 12),
               Text(
-                'Vos documents restent enregistrés localement sur votre appareil. '
-                'Lorsque vous utilisez Gemini, seul le texte nécessaire à l’analyse est envoyé : le PDF ou la photo ne sont pas transmis.\n\n'
+                'Vos documents restent enregistrés localement par défaut. Si vous choisissez la synchronisation, le document PDF ou l’image et votre signature sont envoyés dans votre espace privé Supabase ; votre adresse e-mail y sert à gérer le compte. '
+                'Lorsque vous utilisez Gemini, seul le texte nécessaire à l’analyse est envoyé : le PDF ou la photo ne sont pas transmis à Gemini.\n\n'
                 'Vérifiez toujours les informations importantes avant tout partage ou envoi.',
                 style: TextStyle(
                     color: foreground,
@@ -2600,9 +2933,13 @@ extension DocumentProcessingStepLabel on DocumentProcessingStep {
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen(
-      {super.key, required this.documentStore, required this.procedureStore});
+      {super.key,
+      required this.documentStore,
+      required this.procedureStore,
+      this.scannerService = const AndroidMlKitDocumentScannerService()});
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
+  final DocumentScannerService scannerService;
   @override
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
@@ -2615,10 +2952,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
   String? scanError;
   String? imagePath;
   String? pdfPath;
+  List<String> _sourceScanImagePaths = const [];
+  List<String> _renderedScanImagePaths = const [];
   int scannedPages = 0;
   bool ocrAttempted = false;
   int ocrCharacterCount = 0;
   String? ocrError;
+  DocumentInsight? _correctedInsight;
+  bool _userCorrectedAnalysis = false;
+
+  DocumentInsight get _currentInsight =>
+      _correctedInsight ??
+      SmartDocumentLocalAnalyzer.analyze(textController.text);
 
   @override
   void dispose() {
@@ -2626,9 +2971,49 @@ class _ScannerScreenState extends State<ScannerScreen> {
     super.dispose();
   }
 
-  String _normalisePath(String value) {
-    if (value.startsWith('file://')) return Uri.parse(value).toFilePath();
-    return value;
+  Future<void> _renderCapturedImages({bool refreshOcr = true}) async {
+    if (_sourceScanImagePaths.isEmpty) return;
+    setState(() {
+      processing = true;
+      processingStep = DocumentProcessingStep.scanning;
+      scanError = null;
+    });
+    try {
+      final directory = await getTemporaryDirectory();
+      final pdfPages = <Uint8List>[];
+      for (final path in _sourceScanImagePaths) {
+        pdfPages.add(await File(path).readAsBytes());
+      }
+      final renderedPaths = List<String>.unmodifiable(_sourceScanImagePaths);
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final output = File('${directory.path}/scan_mlkit_$stamp.pdf');
+      await output.writeAsBytes(
+        await ScannerProcessingService.buildA4Pdf(pdfPages),
+        flush: true,
+      );
+      if (!mounted) return;
+      setState(() {
+        pdfPath = output.path;
+        imagePath = renderedPaths.first;
+        _renderedScanImagePaths = renderedPaths;
+        scannedPages = renderedPaths.length;
+        processingStep = refreshOcr
+            ? DocumentProcessingStep.ocr
+            : DocumentProcessingStep.completed;
+      });
+      if (refreshOcr) await _extractTextFromImages(renderedPaths);
+      if (mounted) {
+        setState(() => processingStep = DocumentProcessingStep.completed);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Rendu des images ML Kit impossible : $error\n$stackTrace');
+      if (mounted) {
+        setState(() => scanError =
+            'Le document capturé est conservé, mais son rendu n’a pas pu être préparé.');
+      }
+    } finally {
+      if (mounted) setState(() => processing = false);
+    }
   }
 
   Future<void> _readImage(String path) async {
@@ -2671,6 +3056,41 @@ class _ScannerScreenState extends State<ScannerScreen> {
           }
         });
       }
+    }
+  }
+
+  Future<void> _extractTextFromImages(List<String> paths) async {
+    ocrAttempted = true;
+    ocrError = null;
+    ocrCharacterCount = 0;
+    textController.clear();
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    final buffer = StringBuffer();
+    try {
+      for (var index = 0; index < paths.length && index < 10; index++) {
+        final file = File(paths[index]);
+        if (!await file.exists()) {
+          throw FileSystemException('Page scannée introuvable.', paths[index]);
+        }
+        final recognized =
+            await recognizer.processImage(InputImage.fromFilePath(file.path));
+        final pageText = recognized.text.trim();
+        if (pageText.isNotEmpty) {
+          if (buffer.isNotEmpty) {
+            buffer.writeln('\n--- Page ${index + 1} ---\n');
+          }
+          buffer.write(pageText);
+        }
+      }
+      final text = buffer.toString().trim();
+      textController.text = text;
+      ocrCharacterCount = text.length;
+      if (text.isEmpty) {
+        ocrError =
+            'Aucun texte n’a été détecté. Essayez avec davantage de lumière ou utilisez « Photo simple ».';
+      }
+    } finally {
+      await recognizer.close();
     }
   }
 
@@ -2725,9 +3145,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
+  // Conservé pour une relance OCR depuis les parcours avancés futurs.
+  // ignore: unused_element
   Future<void> _retryOcr() async {
     final path = pdfPath;
-    if (path == null) return;
+    if (path == null && _renderedScanImagePaths.isEmpty) return;
     setState(() {
       processing = true;
       processingStep = DocumentProcessingStep.ocr;
@@ -2735,7 +3157,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
       ocrError = null;
     });
     try {
-      await _extractTextFromPdf(path);
+      if (_renderedScanImagePaths.isNotEmpty) {
+        await _extractTextFromImages(_renderedScanImagePaths);
+      } else {
+        await _extractTextFromPdf(path!);
+      }
       if (!mounted) return;
       setState(() => processingStep = DocumentProcessingStep.completed);
     } catch (error, stackTrace) {
@@ -2758,68 +3184,46 @@ class _ScannerScreenState extends State<ScannerScreen> {
       processingStep = DocumentProcessingStep.scanning;
       scanError = null;
       ocrError = null;
-      ocrAttempted = false;
-      ocrCharacterCount = 0;
-      imagePath = null;
-      textController.clear();
     });
     try {
-      final PdfScanResult? result =
-          await FlutterDocScanner().getScannedDocumentAsPdf(page: 10);
+      final result = await widget.scannerService.scan(pageLimit: 10);
       if (result == null) {
         if (mounted) {
           setState(() => processingStep = DocumentProcessingStep.idle);
         }
         return;
       }
-      final uri = result.pdfUri.trim();
-      if (uri.isEmpty) throw const FormatException('Aucun PDF n’a été créé.');
-
-      final sourcePath = _normalisePath(uri);
-      final dir = await getApplicationDocumentsDirectory();
-      final target =
-          File('${dir.path}/scan_${DateTime.now().millisecondsSinceEpoch}.pdf');
-      if (sourcePath.startsWith('content://')) {
-        pdfPath = sourcePath;
-      } else {
-        final source = File(sourcePath);
-        if (!await source.exists()) {
-          throw const FileSystemException('Le PDF créé est introuvable.');
-        }
-        await source.copy(target.path);
-        pdfPath = target.path;
+      final paths = result.imagePaths.take(10).toList(growable: false);
+      if (paths.isEmpty || paths.any((path) => !File(path).existsSync())) {
+        throw const FileSystemException('La capture est introuvable.');
       }
-      scannedPages = result.pageCount > 0 ? result.pageCount : 1;
       if (!mounted) return;
-      setState(() => processingStep = DocumentProcessingStep.ocr);
-
-      try {
-        await _extractTextFromPdf(pdfPath!);
-      } catch (error, stackTrace) {
-        debugPrint('Erreur OCR après scan : $error\n$stackTrace');
-        ocrAttempted = true;
+      setState(() {
+        ocrAttempted = false;
         ocrCharacterCount = 0;
-        ocrError =
-            'Le PDF a bien été créé, mais le texte n’a pas pu être lu automatiquement.';
-      }
+        textController.clear();
+        _sourceScanImagePaths = paths;
+        _renderedScanImagePaths = const [];
+      });
+
+      await _renderCapturedImages();
 
       if (!mounted) return;
       setState(() => processingStep = DocumentProcessingStep.completed);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
-                'PDF créé • OCR ${ocrCharacterCount > 0 ? 'terminé' : 'à réessayer'}')),
+            content: Text(result.partialResult
+                ? 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's récupérées' : ' récupérée'}'
+                : 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's' : ''}')),
       );
-    } on PlatformException catch (error) {
+    } on DocumentScannerUnavailableException catch (error, stackTrace) {
       if (!mounted) return;
-      setState(() => scanError =
-          'Le scanner est momentanément indisponible. Vérifiez l’autorisation de la caméra puis réessayez.');
-      debugPrint('Erreur scanner plateforme : ${error.code} ${error.message}');
+      setState(() => scanError = DocumentScannerUnavailableException.message);
+      debugPrint('ML Kit Document Scanner indisponible : $error\n$stackTrace');
     } catch (error, stackTrace) {
       if (!mounted) return;
-      setState(() => scanError =
-          'Le document n’a pas pu être scanné. Vérifiez que la feuille est bien visible et réessayez.');
-      debugPrint('Erreur scan inattendue : $error\n$stackTrace');
+      setState(() => scanError = DocumentScannerUnavailableException.message);
+      debugPrint('Erreur scanner ML Kit inattendue : $error\n$stackTrace');
     } finally {
       if (mounted) {
         setState(() {
@@ -2839,6 +3243,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
           source: source, imageQuality: 92, maxWidth: 2200);
       if (file == null) return;
       pdfPath = null;
+      _sourceScanImagePaths = const [];
+      _renderedScanImagePaths = const [];
       scannedPages = 0;
       await _readImage(file.path);
     } catch (error) {
@@ -2870,6 +3276,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
         setState(() {
           imagePath = null;
           pdfPath = null;
+          _sourceScanImagePaths = const [];
+          _renderedScanImagePaths = const [];
           textController.text = content;
         });
       } else if (extension == 'pdf') {
@@ -2877,6 +3285,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
         setState(() {
           imagePath = null;
           pdfPath = path;
+          _sourceScanImagePaths = const [];
+          _renderedScanImagePaths = const [];
           scannedPages = 0;
           processing = true;
           processingStep = DocumentProcessingStep.ocr;
@@ -2902,6 +3312,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
         }
       } else {
         pdfPath = null;
+        _sourceScanImagePaths = const [];
+        _renderedScanImagePaths = const [];
         await _readImage(path);
       }
     } catch (error) {
@@ -2939,47 +3351,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
-  Future<void> _savePdfLocally() async {
-    if (pdfPath == null) return;
-    final path = pdfPath!;
-    if (path.startsWith('content://')) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Ce document doit d’abord être copié dans le stockage de l’application.'),
-        ),
-      );
-      return;
-    }
-
-    try {
-      final bytes = await File(path).readAsBytes();
-      final now = DateTime.now();
-      final stamp = '${now.year.toString().padLeft(4, '0')}'
-          '${now.month.toString().padLeft(2, '0')}'
-          '${now.day.toString().padLeft(2, '0')}_'
-          '${now.hour.toString().padLeft(2, '0')}'
-          '${now.minute.toString().padLeft(2, '0')}';
-      final savedPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Enregistrer le document PDF',
-        fileName: 'AdminFacile_$stamp.pdf',
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-        bytes: bytes,
-      );
-      if (!mounted || savedPath == null) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document enregistré localement.')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enregistrement impossible : $error')),
-      );
-    }
-  }
-
   Future<void> _archiveDocument() async {
     if ((pdfPath == null || pdfPath!.startsWith('content://')) &&
         textController.text.trim().isEmpty) {
@@ -2997,7 +3368,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             '${dir.path}/archive_${DateTime.now().millisecondsSinceEpoch}.pdf');
         archivedPath = (await File(pdfPath!).copy(target.path)).path;
       }
-      final insight = LocalDocumentAnalyzer.analyze(textController.text);
+      final insight = _currentInsight;
       final now = DateTime.now();
       await widget.documentStore.add(SavedDocument(
         id: now.microsecondsSinceEpoch.toString(),
@@ -3010,6 +3381,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
         filePath: archivedPath,
         extractedText: textController.text.trim(),
         deadline: insight.dates.isEmpty ? null : insight.dates.first,
+        detectedDocumentType: insight.documentType,
+        detectedAmount: insight.totalAmount,
+        detectedDueDate: insight.dueDate,
+        detectedReference:
+            insight.references.isEmpty ? '' : insight.references.first,
+        detectedOrganisation: insight.organisation,
+        detectedPriority: insight.priority,
+        analysisConfidence: insight.confidence,
+        userCorrectedAnalysis: _userCorrectedAnalysis,
       ));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3065,6 +3445,275 @@ class _ScannerScreenState extends State<ScannerScreen> {
             procedureStore: widget.procedureStore)));
   }
 
+  Future<void> _correctAnalysis() async {
+    final original = _currentInsight;
+    var type = original.documentType;
+    var priority = original.priority;
+    final organisation = TextEditingController(text: original.organisation);
+    final amount = TextEditingController(text: original.totalAmount);
+    final dueDate = TextEditingController(text: original.dueDate);
+    final reference = TextEditingController(
+        text: original.references.isEmpty ? '' : original.references.first);
+    final category = TextEditingController(text: original.category);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Corriger les informations'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue:
+                    SmartDocumentLocalAnalyzer.documentTypes.contains(type)
+                        ? type
+                        : 'Document inconnu',
+                decoration:
+                    const InputDecoration(labelText: 'Type du document'),
+                items: SmartDocumentLocalAnalyzer.documentTypes
+                    .map((value) =>
+                        DropdownMenuItem(value: value, child: Text(value)))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setDialogState(() => type = value);
+                },
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: organisation,
+                  decoration: const InputDecoration(
+                      labelText: 'Fournisseur ou organisme')),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: amount,
+                  decoration:
+                      const InputDecoration(labelText: 'Montant total')),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: dueDate,
+                  decoration: const InputDecoration(labelText: 'Date limite')),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: reference,
+                  decoration: const InputDecoration(labelText: 'Référence')),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: category,
+                  decoration: const InputDecoration(labelText: 'Catégorie')),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: const [
+                  'Aucune action urgente détectée',
+                  'À vérifier',
+                  'Échéance ou réponse proche'
+                ].contains(priority)
+                    ? priority
+                    : 'À vérifier',
+                decoration: const InputDecoration(labelText: 'Priorité'),
+                items: const [
+                  'Aucune action urgente détectée',
+                  'À vérifier',
+                  'Échéance ou réponse proche'
+                ]
+                    .map((value) =>
+                        DropdownMenuItem(value: value, child: Text(value)))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setDialogState(() => priority = value);
+                },
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Enregistrer')),
+          ],
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      setState(() {
+        _userCorrectedAnalysis = true;
+        _correctedInsight = DocumentInsight(
+          category: category.text.trim().isEmpty ? type : category.text.trim(),
+          summary: original.summary,
+          organisation: organisation.text.trim().isEmpty
+              ? 'Non identifiée'
+              : organisation.text.trim(),
+          dates: dueDate.text.trim().isEmpty ? const [] : [dueDate.text.trim()],
+          amounts: amount.text.trim().isEmpty ? const [] : [amount.text.trim()],
+          references: reference.text.trim().isEmpty
+              ? const []
+              : [reference.text.trim()],
+          actions: original.actions,
+          priority: priority,
+          documentsToPrepare: original.documentsToPrepare,
+          warnings: original.warnings,
+          documentType: type,
+          supplier: organisation.text.trim(),
+          dueDate: dueDate.text.trim(),
+          amountDetails: amount.text.trim().isEmpty
+              ? const []
+              : [
+                  DocumentAmountItem(
+                      label: 'Montant total à payer',
+                      amount: amount.text.trim())
+                ],
+          confidence: original.confidence,
+          requestedDocuments: original.requestedDocuments,
+          suggestedAction: original.suggestedAction,
+        );
+      });
+    }
+    organisation.dispose();
+    amount.dispose();
+    dueDate.dispose();
+    reference.dispose();
+    category.dispose();
+  }
+
+  // Conservé pour la logique structurée V17.1, désormais masquée par défaut.
+  // ignore: unused_element
+  Widget _smartCard(BuildContext context) {
+    final insight = _currentInsight;
+    Color color = switch (insight.priority) {
+      'Échéance ou réponse proche' => Colors.red,
+      'À vérifier' => Colors.orange,
+      _ => Colors.green,
+    };
+    Widget line(String label, String value) => value.trim().isEmpty
+        ? const SizedBox.shrink()
+        : Padding(
+            padding: const EdgeInsets.only(top: 9),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w800))
+            ]),
+          );
+    return Card(
+      key: const Key('scanner-smart-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.auto_awesome, color: color),
+            const SizedBox(width: 9),
+            Expanded(
+                child: Text(insight.documentType,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w900)))
+          ]),
+          line(
+              insight.isInvoice ? 'Fournisseur' : 'Organisme',
+              insight.organisation == 'Non identifiée'
+                  ? 'Non détecté'
+                  : insight.organisation),
+          line('Montant à payer', insight.totalAmount),
+          line('À payer avant', insight.dueDate),
+          line('Référence',
+              insight.references.isEmpty ? '' : insight.references.first),
+          const SizedBox(height: 12),
+          Chip(
+              avatar: CircleAvatar(backgroundColor: color, radius: 6),
+              label: Text(insight.priority)),
+          const Text(
+              'Vérifiez les informations importantes dans le document original.'),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            Tooltip(
+              message: 'Corriger',
+              child: OutlinedButton.icon(
+                  key: const Key('correct-analysis'),
+                  onPressed: _correctAnalysis,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Corriger')),
+            ),
+            Tooltip(
+              message: 'Améliorer avec Gemini',
+              child: FilledButton.tonalIcon(
+                  key: const Key('scanner-gemini-improve'),
+                  onPressed: prepareReply,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Améliorer avec Gemini')),
+            ),
+            PopupMenuButton<String>(
+              key: const Key('scanner-smart-more-menu'),
+              tooltip: 'Plus d’actions',
+              icon: const Icon(Icons.more_horiz_rounded),
+              onSelected: (action) {
+                if (action == 'Contester cette facture') {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => LetterFormScreen(
+                      settings: appSettings,
+                      template: LetterTemplate.energy,
+                      model: ProfessionalLetterModel(
+                        title: 'Contestation de facture',
+                        subject: 'Contestation de la facture',
+                        body:
+                            'Je conteste cette facture et demande sa vérification.',
+                      ),
+                      initialRecipient: insight.organisation == 'Non identifiée'
+                          ? ''
+                          : insight.organisation,
+                      initialDetails:
+                          'Montant détecté : ${insight.totalAmount.isEmpty ? '[À COMPLÉTER]' : insight.totalAmount}\n\nContexte OCR :\n${textController.text}',
+                    ),
+                  ));
+                } else if (action == 'Ajouter un rappel' ||
+                    action == 'Poser une question' ||
+                    action == 'Rédiger une réponse') {
+                  prepareReply();
+                } else if (action == 'Sauvegarder' ||
+                    action == 'Enregistrer dans Mes documents') {
+                  _archiveDocument();
+                } else if (action == 'Partager') {
+                  if (pdfPath != null) _sharePdf();
+                } else if (action == 'Voir le texte complet') {
+                  Scrollable.ensureVisible(
+                    context,
+                    duration: const Duration(milliseconds: 250),
+                  );
+                }
+              },
+              itemBuilder: (_) => insight.actions
+                  .map((action) => PopupMenuItem(
+                        value: action,
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(switch (action) {
+                            'Ajouter un rappel' => Icons.alarm_add_outlined,
+                            'Contester cette facture' => Icons.edit_note,
+                            'Poser une question' => Icons.help_outline,
+                            'Sauvegarder' ||
+                            'Enregistrer dans Mes documents' =>
+                              Icons.save_outlined,
+                            'Partager' => Icons.share_outlined,
+                            'Voir le texte complet' =>
+                              Icons.text_snippet_outlined,
+                            'Sauvegarder dans le cloud' =>
+                              Icons.cloud_upload_outlined,
+                            _ => Icons.arrow_forward,
+                          }),
+                          title: Text(action),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -3077,6 +3726,21 @@ class _ScannerScreenState extends State<ScannerScreen> {
       const SizedBox(height: 8),
       const Text(
           'Placez la feuille dans le cadre. L’application détecte les bords, recadre le document et corrige la perspective.'),
+      const SizedBox(height: 10),
+      const Card(
+        child: Padding(
+          padding: EdgeInsets.all(14),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.crop_free_rounded),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Cadrez toute la feuille. Après la capture, ajustez les quatre poignées si nécessaire, choisissez le filtre puis validez dans le scanner.',
+              ),
+            ),
+          ]),
+        ),
+      ),
       const SizedBox(height: 18),
       SizedBox(
           width: double.infinity,
@@ -3085,7 +3749,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             icon: const Icon(Icons.document_scanner),
             label: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('Scanner une feuille A4')),
+                child: Text('Scanner')),
           )),
       const SizedBox(height: 10),
       Row(children: [
@@ -3094,7 +3758,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 onPressed:
                     processing ? null : () => pickAndRead(ImageSource.camera),
                 icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Photo simple'))),
+                label: const Text('Photo'))),
         const SizedBox(width: 10),
         Expanded(
             child: OutlinedButton.icon(
@@ -3183,37 +3847,54 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                   fontWeight: FontWeight.bold, fontSize: 17)))
                     ]),
                     const SizedBox(height: 12),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      FilledButton.icon(
-                          onPressed: _openPdf,
-                          icon: const Icon(Icons.open_in_new_rounded),
-                          label: const Text('Ouvrir')),
-                      FilledButton.tonalIcon(
-                          onPressed: _savePdfLocally,
-                          icon: const Icon(Icons.save_alt),
-                          label: const Text('Enregistrer')),
-                      FilledButton.tonalIcon(
-                          onPressed: _archiveDocument,
-                          icon: const Icon(Icons.folder_copy_outlined),
-                          label: const Text('Ajouter à Mes documents')),
-                      OutlinedButton.icon(
-                          onPressed: _sharePdf,
-                          icon: const Icon(Icons.share_outlined),
-                          label: const Text('Transmettre')),
-                      OutlinedButton.icon(
-                          onPressed: _printPdf,
-                          icon: const Icon(Icons.print_outlined),
-                          label: const Text('Imprimer')),
+                    Row(children: [
+                      Tooltip(
+                        message: 'Ouvrir',
+                        child: FilledButton.icon(
+                            key: const Key('scanner-pdf-open'),
+                            onPressed: _openPdf,
+                            icon: const Icon(Icons.open_in_new_rounded),
+                            label: const Text('Ouvrir')),
+                      ),
+                      const Spacer(),
+                      PopupMenuButton<String>(
+                        key: const Key('scanner-pdf-more-menu'),
+                        tooltip: 'Plus d’actions',
+                        icon: const Icon(Icons.more_horiz_rounded),
+                        onSelected: (value) {
+                          if (value == 'archive') {
+                            _archiveDocument();
+                          } else if (value == 'share') {
+                            _sharePdf();
+                          } else if (value == 'print') {
+                            _printPdf();
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 'archive',
+                              child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.folder_copy_outlined),
+                                  title: Text('Ajouter à Mes documents'))),
+                          PopupMenuItem(
+                              value: 'share',
+                              child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.share_outlined),
+                                  title: Text('Transmettre'))),
+                          PopupMenuItem(
+                              value: 'print',
+                              child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.print_outlined),
+                                  title: Text('Imprimer'))),
+                        ],
+                      ),
                     ]),
-                    const SizedBox(height: 14),
-                    _ProcessingStatusCard(
-                      pdfReady: pdfPath != null,
-                      ocrAttempted: ocrAttempted,
-                      ocrCharacters: ocrCharacterCount,
-                      ocrError: ocrError,
-                      geminiReady: textController.text.trim().isNotEmpty,
-                      onRetryOcr: processing ? null : _retryOcr,
-                    ),
                   ])),
         ),
       if (!processing && imagePath != null) ...[
@@ -3223,45 +3904,65 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 height: 220, width: double.infinity, fit: BoxFit.contain)),
         const SizedBox(height: 18),
       ],
-      TextField(
-          controller: textController,
-          minLines: 8,
-          maxLines: 16,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-              labelText: 'Contenu du document',
-              alignLabelWithHint: true,
-              hintText:
-                  'Le texte reconnu apparaîtra ici. Vous pouvez aussi le coller ou le dicter.',
-              suffixIcon: VoiceInputButton(controller: textController))),
-      const SizedBox(height: 14),
       if (textController.text.trim().isNotEmpty)
-        Row(children: [
-          Expanded(
-              child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                        ClipboardData(text: textController.text));
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Texte copié')));
-                  },
-                  icon: const Icon(Icons.copy_outlined),
-                  label: const Text('Copier'))),
-          const SizedBox(width: 12),
-          Expanded(
-              child: FilledButton.icon(
-                  onPressed: prepareReply,
-                  icon: const Icon(Icons.auto_awesome_rounded),
-                  label: const Text('Analyser avec Gemini'))),
-        ])
-      else
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: null,
-            icon: const Icon(Icons.auto_awesome_rounded),
-            label: const Text('Analyse Gemini disponible après l’OCR'),
+        Align(
+          alignment: Alignment.centerRight,
+          child: PopupMenuButton<String>(
+            key: const Key('scanner-advanced-analysis'),
+            tooltip: 'Analyse avancée',
+            icon: const Icon(Icons.more_horiz_rounded),
+            onSelected: (value) {
+              if (value == 'ocr') {
+                showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Texte OCR'),
+                    content: SizedBox(
+                      width: 520,
+                      child: SingleChildScrollView(
+                          child: SelectableText(textController.text)),
+                    ),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          child: const Text('Fermer'))
+                    ],
+                  ),
+                );
+              } else if (value == 'analysis') {
+                prepareReply();
+              } else if (value == 'correct') {
+                _correctAnalysis();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                enabled: false,
+                child: Text('Analyse avancée',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              PopupMenuItem(
+                value: 'ocr',
+                child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.text_snippet_outlined),
+                    title: Text('Voir le texte OCR')),
+              ),
+              PopupMenuItem(
+                value: 'analysis',
+                child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.auto_awesome_outlined),
+                    title: Text('Analyse Gemini')),
+              ),
+              PopupMenuItem(
+                value: 'correct',
+                child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Corriger les informations')),
+              ),
+            ],
           ),
         ),
       const SizedBox(height: 18),
@@ -3270,6 +3971,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 }
 
+// Conservé pour les diagnostics de traitement avancés.
+// ignore: unused_element
 class _ProcessingStatusCard extends StatelessWidget {
   const _ProcessingStatusCard({
     required this.pdfReady,
@@ -4032,6 +4735,9 @@ class DocumentInsight {
     this.dueDate = '',
     this.amountDetails = const [],
     this.suggestions = const [],
+    this.confidence = 0.0,
+    this.requestedDocuments = const [],
+    this.suggestedAction = '',
   });
 
   final String category;
@@ -4051,9 +4757,18 @@ class DocumentInsight {
   final String dueDate;
   final List<DocumentAmountItem> amountDetails;
   final List<String> suggestions;
+  final double confidence;
+  final List<String> requestedDocuments;
+  final String suggestedAction;
 
   bool get urgent => priority == 'Urgent';
   bool get isInvoice => documentType.toLowerCase().contains('facture');
+  String get totalAmount {
+    for (final item in amountDetails) {
+      if (item.label == 'Montant total à payer') return item.amount;
+    }
+    return '';
+  }
 }
 
 class GeminiDocumentAnalyzer {
@@ -4078,32 +4793,24 @@ class GeminiDocumentAnalyzer {
     );
 
     final prompt = '''
-Tu es un assistant administratif prudent. Analyse uniquement le courrier fourni.
+Tu es un assistant administratif prudent. Analyse uniquement le document fourni.
 Réponds en français, en JSON valide uniquement, sans markdown.
 N'invente aucune date, aucun montant, aucune référence, aucune obligation et aucun droit.
 Quand une information n'est pas présente, utilise une chaîne vide ou une liste vide.
-Le niveau de priorité doit être exactement: Urgent, Important ou Information.
-Adapte l'analyse au document. Pour une facture, sois très concis et associe chaque montant à son libellé exact (consommation, abonnement, HT, TVA, TTC, etc.). Pour un courrier demandant une action, indique les pièces, délais et conséquences utiles. N'ajoute pas de sections inutiles.
+Pour une facture, conserve uniquement le montant total réellement dû. Ignore capital social, SIREN/SIRET, mentions légales, HT intermédiaire et TVA seule.
+Le résumé fait deux phrases maximum. confidence est un nombre entre 0 et 1.
 
 Retourne cet objet JSON :
 {
-  "type_document": "courrier|facture|mise_en_demeure|contrat|autre",
-  "organisme": "",
-  "categorie": "",
-  "fournisseur": "",
-  "periode_facturation": "",
-  "date_echeance": "",
-  "urgence": "Information",
-  "resume": "",
-  "explication_simple": "",
-  "dates_importantes": [],
-  "montants": [],
-  "detail_montants": [{"libelle": "", "montant": ""}],
-  "references": [],
-  "actions": [],
-  "pieces_a_preparer": [],
-  "points_vigilance": [],
-  "suggestions": []
+  "documentType": "",
+  "organisation": "",
+  "amount": "",
+  "dueDate": "",
+  "reference": "",
+  "summary": "",
+  "requestedDocuments": [],
+  "suggestedAction": "",
+  "confidence": 0.0
 }
 
 COURRIER :
@@ -4168,41 +4875,43 @@ ${sourceText.trim()}
       return result.isEmpty ? fallback : result;
     }
 
-    final actions = strings('actions');
-    final priority = value('urgence', fallback: 'Information');
-    final amountDetails = ((data['detail_montants'] as List?) ?? const [])
-        .whereType<Map>()
-        .map((item) => DocumentAmountItem(
-              label: item['libelle']?.toString().trim() ?? '',
-              amount: item['montant']?.toString().trim() ?? '',
-            ))
-        .where((item) => item.label.isNotEmpty && item.amount.isNotEmpty)
-        .toList();
+    final amount = value('amount');
+    final dueDate = value('dueDate');
+    final reference = value('reference');
+    final rawConfidence = data['confidence'];
+    final confidence = rawConfidence is num
+        ? rawConfidence.toDouble().clamp(0.0, 1.0)
+        : double.tryParse('$rawConfidence')?.clamp(0.0, 1.0) ?? 0.0;
+    final requested = strings('requestedDocuments');
+    final documentType = value('documentType', fallback: 'Document inconnu');
+    final organisation = value('organisation', fallback: 'Non identifiée');
     return DocumentInsight(
-      category: value('categorie', fallback: 'Courrier administratif'),
+      category: documentType,
       summary: value(
-        'resume',
+        'summary',
         fallback: 'Gemini n’a pas pu produire un résumé suffisamment précis.',
       ),
-      organisation: value('organisme', fallback: 'Non identifiée'),
-      dates: strings('dates_importantes'),
-      amounts: strings('montants'),
-      references: strings('references'),
-      actions: actions.isEmpty
-          ? const ['Relire le document original et vérifier les informations.']
-          : actions,
-      priority: const {'Urgent', 'Important', 'Information'}.contains(priority)
-          ? priority
-          : 'Information',
-      documentsToPrepare: strings('pieces_a_preparer'),
-      warnings: strings('points_vigilance'),
-      simpleExplanation: value('explication_simple'),
-      documentType: value('type_document', fallback: 'courrier'),
-      supplier: value('fournisseur'),
-      billingPeriod: value('periode_facturation'),
-      dueDate: value('date_echeance'),
-      amountDetails: amountDetails,
-      suggestions: strings('suggestions'),
+      organisation: organisation,
+      dates: dueDate.isEmpty ? const [] : [dueDate],
+      amounts: amount.isEmpty ? const [] : [amount],
+      references: reference.isEmpty ? const [] : [reference],
+      actions: const ['Vérifier le document original avant toute action.'],
+      priority: value('suggestedAction', fallback: 'À vérifier'),
+      documentsToPrepare: requested,
+      requestedDocuments: requested,
+      warnings: const [
+        'Vérifiez les informations importantes dans le document original.'
+      ],
+      documentType: documentType,
+      supplier: organisation == 'Non identifiée' ? '' : organisation,
+      dueDate: dueDate,
+      amountDetails: amount.isEmpty
+          ? const []
+          : [
+              DocumentAmountItem(label: 'Montant total à payer', amount: amount)
+            ],
+      confidence: confidence,
+      suggestedAction: value('suggestedAction'),
     );
   }
 }
@@ -4774,7 +5483,8 @@ String buildFormattedLetterV1561({
   String completed(String value, String placeholder) =>
       value.trim().isEmpty ? '[$placeholder À COMPLÉTER]' : value.trim();
 
-  final fullName = '${settings.firstName} ${settings.lastName}'.trim();
+  final fullName = capitalizeProfileName(
+      '${settings.firstName} ${settings.lastName}'.trim());
   final senderName = completed(fullName, 'NOM');
   final senderAddress = completed(settings.address, 'ADRESSE');
   final senderLocality = '${settings.postalCode} ${settings.city}'.trim();
@@ -4871,6 +5581,61 @@ class OfficialLetterSheet extends StatelessWidget {
       );
 }
 
+class OfficialSignatureBlock extends StatelessWidget {
+  const OfficialSignatureBlock({
+    super.key,
+    required this.signed,
+    required this.signaturePath,
+    required this.senderName,
+  });
+
+  final bool signed;
+  final String signaturePath;
+  final String senderName;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!signed) return const SizedBox.shrink();
+    final file = File(signaturePath);
+    final hasImage = signaturePath.trim().isNotEmpty && file.existsSync();
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Signature de l’expéditeur',
+              style: TextStyle(color: Colors.black87, fontSize: 13)),
+          const SizedBox(height: 5),
+          Container(
+            key: const Key('official-signature-frame'),
+            width: 150,
+            height: 75,
+            padding: const EdgeInsets.all(8),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.grey.shade400, width: .7),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: hasImage
+                ? Image.file(file,
+                    key: const Key('official-signature-image'),
+                    width: 95,
+                    height: 45,
+                    fit: BoxFit.contain)
+                : const Text('Signature à apposer',
+                    style: TextStyle(color: Colors.black54, fontSize: 12)),
+          ),
+          const SizedBox(height: 4),
+          if (senderName.trim().isNotEmpty)
+            Text(capitalizeProfileName(senderName),
+                style: const TextStyle(color: Colors.black, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+}
+
 Future<Uint8List> buildSignedLetterPdf({
   required String text,
   required String subject,
@@ -4905,21 +5670,7 @@ class LetterSignatureOption extends StatelessWidget {
         key: const Key('letter-signature-option'),
         contentPadding: EdgeInsets.zero,
         value: value,
-        onChanged: (enabled) {
-          if (enabled && !settings.hasSignature) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: const Text(
-                  'Aucune signature enregistrée. Ajoutez-la dans Profil > Ma signature.'),
-              action: SnackBarAction(
-                label: 'Ouvrir le Profil',
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => ProfileScreen(settings: settings))),
-              ),
-            ));
-            return;
-          }
-          onChanged(enabled);
-        },
+        onChanged: onChanged,
         title: const Text('Ajouter ma signature à cette lettre'),
         subtitle: Text(settings.hasSignature
             ? 'La signature apparaîtra au-dessus du nom de l’expéditeur.'
@@ -5096,14 +5847,14 @@ class _GeminiLetterWriterV156ScreenState
       );
       if (!mounted) return;
       setState(() {
-        subject.text = generated.subject;
-        letter.text = buildFormattedLetterV1561(
+        subject.text = normalizeFrenchTypography(generated.subject);
+        letter.text = normalizeFrenchTypography(buildFormattedLetterV1561(
           format: format,
           recipient: recipient.text,
           subject: generated.subject,
           body: generated.body,
           settings: widget.settings,
-        );
+        ));
         status = 'Lettre prête';
       });
     } catch (_) {
@@ -5118,14 +5869,14 @@ class _GeminiLetterWriterV156ScreenState
         tone: tone,
       );
       setState(() {
-        subject.text = local.subject;
-        letter.text = buildFormattedLetterV1561(
+        subject.text = normalizeFrenchTypography(local.subject);
+        letter.text = normalizeFrenchTypography(buildFormattedLetterV1561(
           format: format,
           recipient: recipient.text,
           subject: local.subject,
           body: local.body,
           settings: widget.settings,
-        );
+        ));
         status = 'Erreur de connexion';
         error = 'Gemini est indisponible. Une lettre locale a été préparée.';
       });
@@ -5147,7 +5898,7 @@ class _GeminiLetterWriterV156ScreenState
       );
       if (!mounted) return;
       setState(() {
-        letter.text = improved;
+        letter.text = normalizeFrenchTypography(improved);
         status = 'Lettre prête';
         saved = false;
       });
@@ -5178,7 +5929,7 @@ class _GeminiLetterWriterV156ScreenState
       createdAt: now,
       updatedAt: now,
       notes: 'Lettre enregistrée localement par l’assistant V15.6.',
-      signed: addSignature && widget.settings.hasSignature,
+      signed: addSignature,
     ));
     if (!mounted) return;
     setState(() => saved = true);
@@ -5188,47 +5939,18 @@ class _GeminiLetterWriterV156ScreenState
   }
 
   Future<Uint8List> _pdf() async {
-    final pdf = pw.Document();
     final signatureBytes = addSignature && widget.settings.hasSignature
         ? await File(widget.settings.signaturePath).readAsBytes()
         : null;
-    pdf.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(56, 52, 56, 58),
-      build: (_) => [
-        pw.Text(
-          'Objet : ${subject.text.trim().isEmpty ? '[OBJET À COMPLÉTER]' : subject.text.trim()}',
-          style: pw.TextStyle(
-            color: PdfColors.black,
-            fontSize: 12,
-            fontWeight: pw.FontWeight.bold,
-          ),
-        ),
-        pw.SizedBox(height: 18),
-        pw.Text(
-          letter.text.trim(),
-          style: const pw.TextStyle(
-            color: PdfColors.black,
-            fontSize: 11.5,
-            lineSpacing: 3.5,
-          ),
-        ),
-        if (signatureBytes != null) ...[
-          pw.SizedBox(height: 16),
-          pw.Image(pw.MemoryImage(signatureBytes),
-              width: 130, height: 55, fit: pw.BoxFit.contain),
-          if ('${widget.settings.firstName} ${widget.settings.lastName}'
-              .trim()
-              .isNotEmpty)
-            pw.Text(
-                '${widget.settings.firstName} ${widget.settings.lastName}'
-                    .trim(),
-                style:
-                    const pw.TextStyle(color: PdfColors.black, fontSize: 10)),
-        ],
-      ],
-    ));
-    return pdf.save();
+    return LetterSignatureService.buildLetterPdf(
+      text: letter.text,
+      subject:
+          subject.text.trim().isEmpty ? '[OBJET À COMPLÉTER]' : subject.text,
+      signed: addSignature,
+      signatureBytes: signatureBytes,
+      senderName:
+          '${widget.settings.firstName} ${widget.settings.lastName}'.trim(),
+    );
   }
 
   Future<void> _exportPdf() async {
@@ -5390,25 +6112,14 @@ class _GeminiLetterWriterV156ScreenState
                     suffixIcon: VoiceInputButton(controller: letter),
                   ),
                 ),
-                if (addSignature && widget.settings.hasSignature) ...[
+                if (addSignature) ...[
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Image.file(
-                      File(widget.settings.signaturePath),
-                      key: const Key('letter-signature-preview'),
-                      width: 150,
-                      height: 62,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${widget.settings.firstName} ${widget.settings.lastName}'
-                          .trim(),
-                      style: const TextStyle(color: Colors.black, fontSize: 13),
-                    ),
+                  OfficialSignatureBlock(
+                    key: const Key('letter-signature-preview'),
+                    signed: addSignature,
+                    signaturePath: widget.settings.signaturePath,
+                    senderName:
+                        '${widget.settings.firstName} ${widget.settings.lastName}',
                   ),
                 ],
               ]),
@@ -5480,6 +6191,203 @@ class GeminiApiException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+class SmartDocumentLocalAnalyzer {
+  static const documentTypes = <String>[
+    'Facture de gaz',
+    'Facture d’électricité',
+    'Facture d’eau',
+    'Facture téléphone',
+    'Facture Internet',
+    'Facture d’assurance',
+    'Facture générique',
+    'Courrier CAF',
+    'Courrier CPAM',
+    'Courrier des impôts',
+    'Courrier bancaire',
+    'Courrier d’assurance',
+    'Courrier employeur',
+    'Contrat',
+    'Avis ou notification',
+    'Document inconnu',
+  ];
+
+  static DocumentInsight analyze(String rawText, {DateTime? now}) {
+    final text = rawText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final lower = text.toLowerCase();
+    bool any(Iterable<String> words) => words.any(lower.contains);
+
+    var type = 'Document inconnu';
+    var organisation = 'Non identifiée';
+    var confidence = 0.25;
+    if (any(['primagaz', 'propane']) ||
+        (lower.contains('facture') && lower.contains('gaz'))) {
+      type = 'Facture de gaz';
+      organisation = lower.contains('primagaz') ? 'PRIMAGAZ' : 'Non identifiée';
+      confidence = .95;
+    } else if (any(['edf', 'électricité', 'electricite', ' kwh'])) {
+      type = 'Facture d’électricité';
+      organisation = lower.contains('edf') ? 'EDF' : 'Non identifiée';
+      confidence = .93;
+    } else if (lower.contains('facture') && any(['eau', 'm³', 'm3'])) {
+      type = 'Facture d’eau';
+      confidence = .82;
+    } else if (any(['orange', 'sfr', 'bouygues telecom', 'free mobile'])) {
+      organisation = lower.contains('orange')
+          ? 'Orange'
+          : lower.contains('sfr')
+              ? 'SFR'
+              : lower.contains('bouygues')
+                  ? 'Bouygues Telecom'
+                  : 'Free Mobile';
+      type = any(['internet', 'fibre', 'livebox', 'box'])
+          ? 'Facture Internet'
+          : 'Facture téléphone';
+      confidence = .88;
+    } else if (lower.contains('facture') && lower.contains('assurance')) {
+      type = 'Facture d’assurance';
+      confidence = .8;
+    } else if (lower.contains('facture')) {
+      type = 'Facture générique';
+      confidence = .72;
+    } else if (RegExp(r'\bcaf\b', caseSensitive: false).hasMatch(text)) {
+      type = 'Courrier CAF';
+      organisation = 'CAF';
+      confidence = .95;
+    } else if (any(['cpam', 'assurance maladie', 'ameli'])) {
+      type = 'Courrier CPAM';
+      organisation = 'CPAM';
+      confidence = .94;
+    } else if (any([
+      'impôts',
+      'impots',
+      'direction générale des finances',
+      'trésor public'
+    ])) {
+      type = 'Courrier des impôts';
+      organisation = 'Impôts';
+      confidence = .9;
+    } else if (any(['banque', 'compte bancaire', 'relevé de compte'])) {
+      type = 'Courrier bancaire';
+      confidence = .75;
+    } else if (lower.contains('assurance')) {
+      type = 'Courrier d’assurance';
+      confidence = .72;
+    } else if (any(
+        ['employeur', 'ressources humaines', 'bulletin de salaire'])) {
+      type = 'Courrier employeur';
+      confidence = .75;
+    } else if (lower.contains('contrat')) {
+      type = 'Contrat';
+      confidence = .7;
+    } else if (any(['avis', 'notification'])) {
+      type = 'Avis ou notification';
+      confidence = .65;
+    }
+
+    final amountPattern = RegExp(
+      r'(?:montant\s+(?:total\s+)?(?:à|a)\s+payer|net\s+(?:à|a)\s+payer|total\s+ttc|total\s+dû|total\s+du)\s*[:\-]?\s*(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{2})\s*€)',
+      caseSensitive: false,
+    );
+    final amountMatch = amountPattern.firstMatch(text);
+    final totalAmount = amountMatch?.group(1)?.trim() ?? '';
+
+    final duePattern = RegExp(
+      r'(?:à payer avant le|a payer avant le|date limite(?: de paiement)?|échéance|echeance|au plus tard le)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
+      caseSensitive: false,
+    );
+    final dueDate = duePattern.firstMatch(text)?.group(1)?.trim() ?? '';
+    final reference = RegExp(
+          r'(?:référence (?:client|facture)|reference (?:client|facture)|n° de facture|numéro de facture)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{3,})',
+          caseSensitive: false,
+        ).firstMatch(text)?.group(1)?.trim() ??
+        '';
+
+    final explicitRequested = <String>[];
+    for (final match in RegExp(
+      r'(?:joindre|fournir|transmettre|envoyer)\s+(?:une?|la|le|les|votre|vos)?\s*([^.;]{3,80})',
+      caseSensitive: false,
+    ).allMatches(text)) {
+      final value = match.group(1)?.trim() ?? '';
+      if (value.isNotEmpty) explicitRequested.add(value);
+    }
+
+    DateTime? parsedDue;
+    final parts = dueDate.split(RegExp(r'[/-]'));
+    if (parts.length == 3) {
+      final yearValue = int.tryParse(parts[2]);
+      final year = yearValue == null
+          ? null
+          : yearValue < 100
+              ? 2000 + yearValue
+              : yearValue;
+      if (year != null) {
+        parsedDue = DateTime.tryParse(
+          '$year-${parts[1].padLeft(2, '0')}-${parts[0].padLeft(2, '0')}',
+        );
+      }
+    }
+    final today = now ?? DateTime.now();
+    final days = parsedDue
+        ?.difference(DateTime(today.year, today.month, today.day))
+        .inDays;
+    final priority = days != null && days >= 0 && days <= 14
+        ? 'Échéance ou réponse proche'
+        : confidence < .7 || type == 'Document inconnu'
+            ? 'À vérifier'
+            : 'Aucune action urgente détectée';
+
+    final isInvoice = type.startsWith('Facture');
+    final actions = isInvoice
+        ? <String>[
+            'Ajouter un rappel',
+            'Contester cette facture',
+            'Poser une question',
+            'Sauvegarder',
+            'Partager',
+            'Voir le texte complet',
+          ]
+        : <String>[
+            'Rédiger une réponse',
+            'Ajouter un rappel',
+            'Enregistrer dans Mes documents',
+            'Sauvegarder dans le cloud',
+            'Partager',
+            'Voir le texte complet',
+          ];
+    final summary = text.isEmpty
+        ? 'Aucun texte exploitable détecté.'
+        : text.length > 180
+            ? '${text.substring(0, 180)}…'
+            : text;
+    return DocumentInsight(
+      category: type,
+      summary: summary,
+      organisation: organisation,
+      dates: dueDate.isEmpty ? const [] : [dueDate],
+      amounts: totalAmount.isEmpty ? const [] : [totalAmount],
+      references: reference.isEmpty ? const [] : [reference],
+      actions: actions,
+      priority: priority,
+      documentsToPrepare: explicitRequested,
+      requestedDocuments: explicitRequested,
+      warnings: const [
+        'Vérifiez les informations importantes dans le document original.'
+      ],
+      documentType: type,
+      supplier: organisation == 'Non identifiée' ? '' : organisation,
+      dueDate: dueDate,
+      amountDetails: totalAmount.isEmpty
+          ? const []
+          : [
+              DocumentAmountItem(
+                  label: 'Montant total à payer', amount: totalAmount)
+            ],
+      confidence: confidence,
+      suggestedAction: priority,
+    );
+  }
 }
 
 class LocalDocumentAnalyzer {
@@ -5700,7 +6608,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
   @override
   void initState() {
     super.initState();
-    insight = LocalDocumentAnalyzer.analyze(widget.sourceText);
+    insight = SmartDocumentLocalAnalyzer.analyze(widget.sourceText);
   }
 
   Color _priorityColor(BuildContext context) => switch (insight.priority) {
@@ -6547,7 +7455,7 @@ Cordialement,''';
       text: draft.text,
       subject: 'Réponse à votre courrier',
       heading: 'AdminFacile - Réponse administrative',
-      signed: addSignature && settings.hasSignature,
+      signed: addSignature,
       signaturePath: settings.signaturePath,
       senderName: '${settings.firstName} ${settings.lastName}'.trim(),
     );
@@ -7180,19 +8088,6 @@ class _AssistantSuggestionsScreenState
     }
   }
 
-  LetterTemplate _templateFor(String value) => switch (value) {
-        'Assurance' => LetterTemplate.insurance,
-        'Banque' => LetterTemplate.bank,
-        'CAF' => LetterTemplate.caf,
-        'CPAM' => LetterTemplate.cpam,
-        'Impôts' => LetterTemplate.taxes,
-        'Retraite' => LetterTemplate.retirement,
-        'Employeur' => LetterTemplate.employer,
-        'Logement' => LetterTemplate.housing,
-        'Énergie' => LetterTemplate.energy,
-        _ => LetterTemplate.telecom,
-      };
-
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Lettres recommandées')),
@@ -7266,7 +8161,8 @@ class _AssistantSuggestionsScreenState
                               MaterialPageRoute(
                                 builder: (_) => LetterFormScreen(
                                   settings: widget.settings,
-                                  template: _templateFor(record.category),
+                                  template: letterTemplateForCategory(
+                                      record.category),
                                   model: ProfessionalLetterModel(
                                     title: record.title,
                                     subject: record.subject,
@@ -7888,7 +8784,11 @@ class JsonLetterRecord {
       required this.title,
       required this.subject,
       required this.body,
-      required this.keywords});
+      required this.keywords,
+      this.organisation = '',
+      this.description = '',
+      this.fields = const <String>[],
+      this.recommendedTone = 'Professionnel'});
   final String id;
   final String category;
   final String subcategory;
@@ -7896,23 +8796,370 @@ class JsonLetterRecord {
   final String subject;
   final String body;
   final List<String> keywords;
+  final String organisation;
+  final String description;
+  final List<String> fields;
+  final String recommendedTone;
 
   factory JsonLetterRecord.fromJson(Map<String, dynamic> json) =>
       JsonLetterRecord(
         id: json['id'] as String,
-        category: json['category'] as String,
-        subcategory: json['subcategory'] as String? ?? 'Demandes générales',
-        title: json['title'] as String,
-        subject: json['subject'] as String,
-        body: json['body'] as String,
+        category: normalizeFrenchTypography(json['category'] as String),
+        subcategory: normalizeFrenchTypography(
+            json['subcategory'] as String? ?? 'Demandes générales'),
+        title: normalizeFrenchTypography(json['title'] as String),
+        subject: normalizeFrenchTypography(json['subject'] as String),
+        body: normalizeFrenchTypography(json['body'] as String),
         keywords:
-            List<String>.from(json['keywords'] as List<dynamic>? ?? const []),
+            List<String>.from(json['keywords'] as List<dynamic>? ?? const [])
+                .map(normalizeFrenchTypography)
+                .toList(),
+        organisation:
+            normalizeFrenchTypography(json['organisation'] as String? ?? ''),
+        description: normalizeFrenchTypography(json['description'] as String? ??
+            'Lettre personnalisable pour ${json['title'] as String}.'),
+        fields: List<String>.from(json['fields'] as List<dynamic>? ??
+                const ['destinataire', 'reference', 'precisions'])
+            .map(normalizeFrenchTypography)
+            .toList(),
+        recommendedTone:
+            ((json['tones'] as List<dynamic>?)?.isNotEmpty ?? false)
+                ? (json['tones'] as List<dynamic>).first.toString()
+                : 'Professionnel',
+      );
+}
+
+class V173LetterCatalog {
+  static const categories = <String>[
+    'Administration',
+    'CAF',
+    'CPAM / Assurance Maladie',
+    'Impôts',
+    'France Travail',
+    'Retraite',
+    'Préfecture',
+    'Mairie',
+    'Éducation',
+    'Logement',
+    'Bailleur',
+    'Énergie',
+    'Eau',
+    'Télécoms',
+    'Banque',
+    'Crédit',
+    'Assurance',
+    'Santé',
+    'Travail',
+    'Employeur',
+    'Automobile',
+    'Consommation',
+    'Achats en ligne',
+    'Transport',
+    'Justice',
+    'Famille',
+    'Voisinage',
+    'Résiliation',
+    'Réclamation',
+    'Contestation',
+    'Mise en demeure',
+    'Demande de document',
+    'Relance',
+    'Divers'
+  ];
+
+  static final List<JsonLetterRecord> additionalRecords = [
+    for (var index = 0; index < categories.length; index++)
+      JsonLetterRecord(
+        id: 'v173_category_${index.toString().padLeft(2, '0')}',
+        category: categories[index],
+        subcategory: 'Demande courante',
+        title: 'Demande auprès de ${categories[index]}',
+        organisation: categories[index],
+        description:
+            'Présenter clairement une demande concernant ${categories[index]}.',
+        subject: 'Demande concernant ${categories[index]}',
+        body:
+            'Je vous contacte au sujet de ma situation concernant ${categories[index]}. '
+            'Les faits utiles et ma demande précise sont indiqués ci-dessous. '
+            'Je vous remercie de m’informer de la suite donnée et des éventuels documents nécessaires.',
+        keywords: [
+          categories[index].toLowerCase(),
+          'demande',
+          'courrier',
+          'dossier',
+          'réponse'
+        ],
+        fields: const ['destinataire', 'référence', 'situation', 'demande'],
+      ),
+    const JsonLetterRecord(
+        id: 'v173_orange_mobile_cancel',
+        category: 'Télécoms',
+        subcategory: 'Résiliation',
+        organisation: 'Orange',
+        title: 'Résiliation abonnement mobile Orange',
+        description: 'Demander la clôture d’un forfait mobile Orange.',
+        subject: 'Résiliation de mon abonnement mobile Orange',
+        body:
+            'Je vous demande de résilier mon abonnement mobile Orange identifié ci-dessous. Merci de me confirmer la date de fin du contrat et l’arrêt de la facturation.',
+        keywords: ['résilier', 'résiliation', 'orange', 'mobile', 'forfait'],
+        fields: ['numéro de ligne', 'référence client', 'date souhaitée']),
+    const JsonLetterRecord(
+        id: 'v173_orange_internet_cancel',
+        category: 'Télécoms',
+        subcategory: 'Résiliation',
+        organisation: 'Orange',
+        title: 'Résiliation Internet Orange',
+        description: 'Résilier une offre Internet ou Livebox Orange.',
+        subject: 'Résiliation de mon abonnement Internet Orange',
+        body:
+            'Je vous demande de résilier mon offre Internet Orange mentionnée ci-dessous. Merci de préciser la date de fin, les modalités de restitution du matériel et le solde éventuel.',
+        keywords: ['résilier', 'résiliation', 'orange', 'internet', 'livebox'],
+        fields: ['numéro client', 'adresse de la ligne', 'date souhaitée']),
+    const JsonLetterRecord(
+        id: 'v173_orange_after_cancel',
+        category: 'Réclamation',
+        subcategory: 'Télécoms',
+        organisation: 'Orange',
+        title: 'Réclamation après résiliation Orange',
+        description: 'Signaler un problème persistant après une résiliation.',
+        subject: 'Réclamation après la résiliation de mon abonnement Orange',
+        body:
+            'Malgré la résiliation de mon abonnement Orange, le problème décrit ci-dessous demeure. Je vous demande de vérifier mon dossier et de régulariser la situation.',
+        keywords: ['orange', 'réclamation', 'après résiliation', 'facturation'],
+        fields: ['référence client', 'date de résiliation', 'problème']),
+    const JsonLetterRecord(
+        id: 'v173_orange_cancel_fees',
+        category: 'Contestation',
+        subcategory: 'Télécoms',
+        organisation: 'Orange',
+        title: 'Contestation de frais de résiliation Orange',
+        description: 'Contester des frais de clôture ou de résiliation.',
+        subject: 'Contestation des frais de résiliation facturés',
+        body:
+            'Je conteste les frais de résiliation portés à mon compte Orange pour les raisons exposées ci-dessous. Merci de vérifier leur origine et de corriger la facturation si nécessaire.',
+        keywords: [
+          'orange',
+          'contester',
+          'contestation',
+          'frais',
+          'résiliation'
+        ],
+        fields: [
+          'numéro client',
+          'montant',
+          'facture',
+          'motif'
+        ]),
+    const JsonLetterRecord(
+        id: 'v173_edf_invoice_dispute',
+        category: 'Énergie',
+        subcategory: 'Facturation',
+        organisation: 'EDF',
+        title: 'Contester une facture EDF',
+        description: 'Demander la vérification d’une facture EDF contestée.',
+        subject: 'Contestation de ma facture EDF',
+        body:
+            'Je conteste le montant ou les éléments de la facture EDF indiquée ci-dessous. Je vous demande de vérifier le relevé, la période et le calcul puis de me transmettre une réponse détaillée.',
+        keywords: ['edf', 'facture', 'contester', 'montant', 'relevé'],
+        fields: ['numéro client', 'facture', 'montant', 'motif']),
+    const JsonLetterRecord(
+        id: 'v173_edf_payment_plan',
+        category: 'Énergie',
+        subcategory: 'Paiement',
+        organisation: 'EDF',
+        title: 'Demande d’échéancier EDF',
+        description: 'Proposer un règlement échelonné à EDF.',
+        subject: 'Demande d’échelonnement de ma facture EDF',
+        body:
+            'Je rencontre une difficulté temporaire pour régler ma facture EDF. Je sollicite un échéancier adapté et vous propose les modalités précisées ci-dessous.',
+        keywords: ['edf', 'facture', 'échéancier', 'paiement', 'délai'],
+        fields: ['numéro client', 'montant', 'mensualité proposée']),
+    const JsonLetterRecord(
+        id: 'v173_edf_invoice_explanation',
+        category: 'Énergie',
+        subcategory: 'Facturation',
+        organisation: 'EDF',
+        title: 'Demande d’explication de facture EDF',
+        description: 'Obtenir le détail d’une facture difficile à comprendre.',
+        subject: 'Demande d’explication concernant ma facture EDF',
+        body:
+            'Je souhaite obtenir une explication détaillée de la facture EDF citée ci-dessous, notamment sur la période, les index et les montants appliqués.',
+        keywords: ['edf', 'facture', 'explication', 'détail', 'consommation'],
+        fields: ['numéro client', 'facture', 'éléments à expliquer']),
+    const JsonLetterRecord(
+        id: 'v173_edf_meter_error',
+        category: 'Énergie',
+        subcategory: 'Relevé',
+        organisation: 'EDF',
+        title: 'Signalement d’une erreur de relevé EDF',
+        description: 'Faire corriger un index ou un relevé de compteur.',
+        subject: 'Signalement d’une erreur de relevé',
+        body:
+            'Le relevé utilisé pour ma facture EDF semble différent de l’index visible sur mon compteur. Je vous demande de contrôler les données et de régulariser la facture si nécessaire.',
+        keywords: ['edf', 'facture', 'erreur', 'relevé', 'compteur', 'index'],
+        fields: ['numéro client', 'index constaté', 'date', 'facture']),
+  ];
+
+  static String normalize(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[àáâä]'), 'a')
+      .replaceAll(RegExp(r'[éèêë]'), 'e')
+      .replaceAll(RegExp(r'[îï]'), 'i')
+      .replaceAll(RegExp(r'[ôö]'), 'o')
+      .replaceAll(RegExp(r'[ùûü]'), 'u')
+      .replaceAll('ç', 'c')
+      .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  static List<JsonLetterRecord> search(
+      Iterable<JsonLetterRecord> records, String query) {
+    final normalized = normalize(query)
+        .replaceAll('resilier', 'resiliation')
+        .replaceAll('rembourser', 'remboursement');
+    final words = normalized.split(' ').where((e) => e.length > 1).toList();
+    final scored = <({JsonLetterRecord record, int score})>[];
+    for (final record in records) {
+      final title = normalize(record.title);
+      final organisation = normalize(record.organisation);
+      final haystack = normalize('${record.title} ${record.category} '
+              '${record.subcategory} ${record.organisation} ${record.description} '
+              '${record.subject} ${record.keywords.join(' ')}')
+          .replaceAll('resilier', 'resiliation');
+      if (!words.every(haystack.contains)) continue;
+      var score = 0;
+      for (final word in words) {
+        if (title.contains(word)) score += 12;
+        if (organisation.contains(word)) score += 10;
+        if (haystack.contains(word)) score += 2;
+      }
+      if (title.contains(normalized)) score += 30;
+      scored.add((record: record, score: score));
+    }
+    scored.sort((a, b) => b.score != a.score
+        ? b.score.compareTo(a.score)
+        : a.record.title.compareTo(b.record.title));
+    return scored.map((e) => e.record).toList();
+  }
+}
+
+LetterTemplate letterTemplateForCategory(String value) => switch (value) {
+      'Assurance' => LetterTemplate.insurance,
+      'Banque' || 'Crédit' => LetterTemplate.bank,
+      'CAF' => LetterTemplate.caf,
+      'CPAM' || 'CPAM / Assurance Maladie' || 'Santé' => LetterTemplate.cpam,
+      'Impôts' ||
+      'Administration' ||
+      'Préfecture' ||
+      'Mairie' =>
+        LetterTemplate.taxes,
+      'Retraite' => LetterTemplate.retirement,
+      'Employeur' || 'Travail' || 'France Travail' => LetterTemplate.employer,
+      'Logement' || 'Bailleur' || 'Voisinage' => LetterTemplate.housing,
+      'Énergie' || 'Eau' => LetterTemplate.energy,
+      _ => LetterTemplate.telecom,
+    };
+
+class LetterModelDetailScreen extends StatefulWidget {
+  const LetterModelDetailScreen(
+      {super.key, required this.settings, required this.record});
+  final AppSettings settings;
+  final JsonLetterRecord record;
+
+  @override
+  State<LetterModelDetailScreen> createState() =>
+      _LetterModelDetailScreenState();
+}
+
+class _LetterModelDetailScreenState extends State<LetterModelDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _recordUsage();
+  }
+
+  Future<void> _recordUsage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList('jsonLibraryHistoryV66') ?? <String>[];
+    history.remove(widget.record.id);
+    history.insert(0, widget.record.id);
+    await prefs.setStringList(
+        'jsonLibraryHistoryV66', history.take(30).toList());
+  }
+
+  void _useModel() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LetterFormScreen(
+        settings: widget.settings,
+        template: letterTemplateForCategory(widget.record.category),
+        model: ProfessionalLetterModel(
+          title: widget.record.title,
+          subject: widget.record.subject,
+          body: widget.record.body,
+        ),
+        initialRecipient: widget.record.organisation,
+        initialDetails: widget.record.fields.isEmpty
+            ? ''
+            : 'Champs à compléter : ${widget.record.fields.join(', ')}',
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: Key('model-detail-${widget.record.id}'),
+        appBar: AppBar(title: const Text('Aperçu du modèle')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(18),
+            children: [
+              Text(widget.record.title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text('${widget.record.category} • ${widget.record.subcategory}'),
+              if (widget.record.organisation.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('Organisme : ${widget.record.organisation}'),
+              ],
+              const SizedBox(height: 18),
+              Text('Objet', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 5),
+              Text(widget.record.subject),
+              const SizedBox(height: 18),
+              Text('Aperçu', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 5),
+              Text(widget.record.body),
+              if (widget.record.fields.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Text('Champs à compléter',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 5),
+                Text(widget.record.fields.join(' • ')),
+              ],
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                key: const Key('use-selected-model'),
+                onPressed: _useModel,
+                icon: const Icon(Icons.edit_note_rounded),
+                label: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 14),
+                  child: Text('Utiliser ce modèle'),
+                ),
+              ),
+            ],
+          ),
+        ),
       );
 }
 
 class JsonLibraryScreen extends StatefulWidget {
-  const JsonLibraryScreen({super.key, required this.settings});
+  const JsonLibraryScreen(
+      {super.key, required this.settings, this.initialRecords});
   final AppSettings settings;
+  final List<JsonLetterRecord>? initialRecords;
   @override
   State<JsonLibraryScreen> createState() => _JsonLibraryScreenState();
 }
@@ -7941,12 +9188,9 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
 
   Future<void> _load() async {
     try {
-      final raw = await rootBundle.loadString('assets/letters/library.json');
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final list = (data['templates'] as List<dynamic>)
-          .map((e) =>
-              JsonLetterRecord.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
+      final list = widget.initialRecords != null
+          ? List<JsonLetterRecord>.from(widget.initialRecords!)
+          : await _loadBundledRecords();
       final prefs = await SharedPreferences.getInstance();
       favorites
         ..clear()
@@ -7968,6 +9212,16 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
     }
   }
 
+  Future<List<JsonLetterRecord>> _loadBundledRecords() async {
+    final raw = await rootBundle.loadString('assets/letters/library.json');
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    return (data['templates'] as List<dynamic>)
+        .map((e) =>
+            JsonLetterRecord.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList()
+      ..addAll(V173LetterCatalog.additionalRecords);
+  }
+
   Future<void> _toggleFavorite(String id) async {
     setState(() {
       if (!favorites.add(id)) favorites.remove(id);
@@ -7977,25 +9231,14 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
   }
 
   Future<void> _openRecord(JsonLetterRecord item) async {
-    history.remove(item.id);
-    history.insert(0, item.id);
-    if (history.length > 30) history = history.take(30).toList();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_historyKey, history);
-    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => LetterFormScreen(
-          settings: widget.settings,
-          template: _templateFor(item.category),
-          model: ProfessionalLetterModel(
-            title: item.title,
-            subject: item.subject,
-            body: item.body,
-          ),
-        ),
+        builder: (_) =>
+            LetterModelDetailScreen(settings: widget.settings, record: item),
       ),
     );
+    final prefs = await SharedPreferences.getInstance();
+    history = prefs.getStringList(_historyKey) ?? <String>[];
     if (mounted) setState(() {});
   }
 
@@ -8011,23 +9254,17 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
 
   List<JsonLetterRecord> get filtered {
     final q = controller.text.trim().toLowerCase();
-    final words = q
-        .replaceAll(RegExp(r'[^a-zA-ZÀ-ÿ0-9 ]'), ' ')
-        .split(RegExp(r'\s+'))
-        .where((e) => e.isNotEmpty);
     final historyPositions = <String, int>{
       for (var i = 0; i < history.length; i++) history[i]: i,
     };
-    final result = records.where((e) {
+    var result = records.where((e) {
       if (category != null && e.category != category) return false;
       if (subcategory != null && e.subcategory != subcategory) return false;
       if (favoritesOnly && !favorites.contains(e.id)) return false;
       if (recentOnly && !historyPositions.containsKey(e.id)) return false;
-      final haystack = '${e.category} ${e.subcategory} ${e.title} '
-              '${e.subject} ${e.body} ${e.keywords.join(' ')}'
-          .toLowerCase();
-      return words.every(haystack.contains);
+      return true;
     }).toList();
+    if (q.isNotEmpty) result = V173LetterCatalog.search(result, q);
     if (recentOnly) {
       result.sort((a, b) => (historyPositions[a.id] ?? 999)
           .compareTo(historyPositions[b.id] ?? 999));
@@ -8036,19 +9273,6 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
     }
     return result;
   }
-
-  LetterTemplate _templateFor(String value) => switch (value) {
-        'Assurance' => LetterTemplate.insurance,
-        'Banque' => LetterTemplate.bank,
-        'CAF' => LetterTemplate.caf,
-        'CPAM' => LetterTemplate.cpam,
-        'Impôts' => LetterTemplate.taxes,
-        'Retraite' => LetterTemplate.retirement,
-        'Employeur' => LetterTemplate.employer,
-        'Logement' => LetterTemplate.housing,
-        'Énergie' => LetterTemplate.energy,
-        _ => LetterTemplate.telecom,
-      };
 
   @override
   void dispose() {
@@ -8074,7 +9298,8 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                         controller: controller,
                         decoration: InputDecoration(
                           prefixIcon: const Icon(Icons.search),
-                          labelText: 'Rechercher parmi 500 courriers',
+                          labelText:
+                              'Rechercher parmi ${records.length} modèles',
                           hintText:
                               'Ex. résiliation Orange, facture EDF, préavis…',
                           suffixIcon: controller.text.isEmpty
@@ -8181,19 +9406,41 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                       ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(18, 10, 18, 6),
-                      child: Row(
-                        children: [
+                      child: Column(children: [
+                        Row(children: [
                           Expanded(
                             child: Text(
                               '${items.length} courrier${items.length > 1 ? 's' : ''} '
                               'sur ${records.length}',
                             ),
                           ),
-                          const Icon(Icons.cloud_off, size: 18),
+                          const Tooltip(
+                            message:
+                                'Les modèles sont disponibles même sans connexion Internet.',
+                            child: Icon(Icons.offline_bolt_outlined, size: 18),
+                          ),
                           const SizedBox(width: 6),
-                          const Text('Hors ligne'),
-                        ],
-                      ),
+                          const Flexible(
+                              child: Text('Disponible hors connexion')),
+                        ]),
+                        const SizedBox(height: 7),
+                        Wrap(spacing: 8, runSpacing: 6, children: [
+                          Chip(
+                            avatar: Icon(Icons.auto_awesome_outlined, size: 16),
+                            label: Text(GeminiDocumentAnalyzer.isConfigured
+                                ? 'Gemini connecté'
+                                : 'Gemini indisponible'),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          Chip(
+                            avatar: Icon(Icons.cloud_outlined, size: 16),
+                            label: Text(_supabaseReady
+                                ? 'Supabase synchronisé'
+                                : 'Supabase indisponible'),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ]),
+                      ]),
                     ),
                     Expanded(
                       child: items.isEmpty
@@ -8216,37 +9463,47 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                                 final item = items[index];
                                 final favorite = favorites.contains(item.id);
                                 return Card(
-                                  child: ListTile(
-                                    minVerticalPadding: 14,
-                                    leading: CircleAvatar(
-                                      child:
-                                          Text(item.category.characters.first),
-                                    ),
-                                    title: Text(
-                                      item.title,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
+                                  child: Column(children: [
+                                    ListTile(
+                                      minVerticalPadding: 12,
+                                      leading: CircleAvatar(
+                                        child: Text(
+                                            item.category.characters.first),
                                       ),
-                                    ),
-                                    subtitle: Text(
-                                      '${item.category} • ${item.subcategory}\n${item.subject}',
-                                      maxLines: 3,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    isThreeLine: true,
-                                    trailing: IconButton(
-                                      tooltip: favorite
-                                          ? 'Retirer des favoris'
-                                          : 'Ajouter aux favoris',
-                                      onPressed: () => _toggleFavorite(item.id),
-                                      icon: Icon(
-                                        favorite
+                                      title: Text(item.title,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600)),
+                                      subtitle: Text(
+                                        '${item.category} • ${item.subcategory}\n${item.description}',
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      isThreeLine: true,
+                                      trailing: IconButton(
+                                        tooltip: favorite
+                                            ? 'Retirer des favoris'
+                                            : 'Ajouter aux favoris',
+                                        onPressed: () =>
+                                            _toggleFavorite(item.id),
+                                        icon: Icon(favorite
                                             ? Icons.star
-                                            : Icons.star_border,
+                                            : Icons.star_border),
+                                      ),
+                                      onTap: () => _openRecord(item),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          16, 0, 16, 12),
+                                      child: SizedBox(
+                                        width: double.infinity,
+                                        child: FilledButton.tonal(
+                                          onPressed: () => _openRecord(item),
+                                          child:
+                                              const Text('Utiliser ce modèle'),
+                                        ),
                                       ),
                                     ),
-                                    onTap: () => _openRecord(item),
-                                  ),
+                                  ]),
                                 );
                               },
                             ),
@@ -8448,8 +9705,8 @@ class LetterLibraryScreen extends StatelessWidget {
                   .headlineMedium
                   ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          const Text(
-              '10 domaines et 100 courriers professionnels prêts à personnaliser.'),
+          Text(
+              'Plus de ${500 + V173LetterCatalog.additionalRecords.length} modèles de lettres administratives'),
           const SizedBox(height: 20),
           ...LetterTemplate.values.map((template) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -8510,11 +9767,13 @@ class LetterFormScreen extends StatefulWidget {
     required this.template,
     required this.model,
     this.initialRecipient = '',
+    this.initialDetails = '',
   });
   final AppSettings settings;
   final LetterTemplate template;
   final ProfessionalLetterModel model;
   final String initialRecipient;
+  final String initialDetails;
   @override
   State<LetterFormScreen> createState() => _LetterFormScreenState();
 }
@@ -8547,6 +9806,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
     postalCode = TextEditingController(text: widget.settings.postalCode);
     city = TextEditingController(text: widget.settings.city);
     recipient.text = widget.initialRecipient;
+    details.text = widget.initialDetails;
     addSignature = LetterSignatureService.defaultForLetter(
       autoInsert: widget.settings.autoInsertSignature,
       hasSignature: widget.settings.hasSignature,
@@ -8680,7 +9940,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
         letter: letter,
         createdAt: now,
         updatedAt: now,
-        signed: addSignature && widget.settings.hasSignature,
+        signed: addSignature,
       ),
     );
     if (!mounted) return;
@@ -9031,7 +10291,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
       final improved = await GeminiLetterWriter.improve(
           letter: controller.text, tone: selected);
       if (!mounted) return;
-      controller.text = improved;
+      controller.text = normalizeFrenchTypography(improved);
       controller.selection =
           TextSelection.collapsed(offset: controller.text.length);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -9057,7 +10317,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
     return LetterSignatureService.buildLetterPdf(
       text: controller.text,
       subject: widget.defaultSubject,
-      signed: addSignature && (settings?.hasSignature ?? false),
+      signed: addSignature,
       signaturePath: settings?.signaturePath ?? '',
       senderName: settings == null
           ? ''
@@ -9175,24 +10435,14 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                       widget.onSignedChanged?.call(value);
                     },
                   ),
-                if (addSignature &&
-                    (widget.settings?.hasSignature ?? false)) ...[
+                if (addSignature && widget.settings != null) ...[
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Image.file(File(widget.settings!.signaturePath),
-                        key: const Key('preview-signature-image'),
-                        width: 150,
-                        height: 62,
-                        fit: BoxFit.contain),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${widget.settings!.firstName} ${widget.settings!.lastName}'
-                          .trim(),
-                      style: const TextStyle(color: Colors.black, fontSize: 13),
-                    ),
+                  OfficialSignatureBlock(
+                    key: const Key('preview-signature-image'),
+                    signed: addSignature,
+                    signaturePath: widget.settings!.signaturePath,
+                    senderName:
+                        '${widget.settings!.firstName} ${widget.settings!.lastName}',
                   ),
                 ],
               ]),
@@ -9322,6 +10572,48 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
     }
   }
 
+  Future<Uint8List> _procedurePdf(AdministrativeProcedure item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final signaturePath = prefs.getString('signaturePathV17') ?? '';
+    return LetterSignatureService.buildLetterPdf(
+      text: item.letter,
+      subject: item.title,
+      heading: item.organisation.isEmpty ? item.category : item.organisation,
+      signed: item.signed,
+      signaturePath: signaturePath,
+      senderName: '${appSettings.firstName} ${appSettings.lastName}'.trim(),
+      notes: item.notes,
+    );
+  }
+
+  Future<void> _downloadProcedure(AdministrativeProcedure item) async {
+    final bytes = await _procedurePdf(item);
+    await FilePicker.platform.saveFile(
+      dialogTitle: 'Télécharger la démarche',
+      fileName: '${item.title.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')}.pdf',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      bytes: bytes,
+    );
+  }
+
+  Future<void> _shareProcedure(AdministrativeProcedure item) async {
+    final bytes = await _procedurePdf(item);
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/demarche_${item.id}.pdf');
+    await file.writeAsBytes(bytes, flush: true);
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(file.path)], subject: item.title),
+    );
+  }
+
+  // Conservé pour les parcours avancés existants.
+  // ignore: unused_element
+  Future<void> _printProcedure(AdministrativeProcedure item) async {
+    final bytes = await _procedurePdf(item);
+    await Printing.layoutPdf(onLayout: (_) async => bytes, name: item.title);
+  }
+
   Future<void> _uploadProcedure(AdministrativeProcedure item) async {
     if (!_supabaseReady) {
       if (!mounted) return;
@@ -9354,17 +10646,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
     _failedProcedureIds.remove(item.id);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final signaturePath = prefs.getString('signaturePathV17') ?? '';
-      final bytes = await LetterSignatureService.buildLetterPdf(
-        text: item.letter,
-        subject: item.title,
-        heading: item.organisation.isEmpty ? item.category : item.organisation,
-        signed: item.signed,
-        signaturePath: signaturePath,
-        senderName: '${appSettings.firstName} ${appSettings.lastName}'.trim(),
-        notes: item.notes,
-      );
+      final bytes = await _procedurePdf(item);
       final cloudPath = procedureCloudPath(user.id, item.id);
 
       await client.storage.from('admin-documents').uploadBinary(
@@ -9621,8 +10903,6 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CircleAvatar(child: Icon(item.status.icon)),
-                              const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -9633,51 +10913,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                           .textTheme
                                           .titleMedium,
                                     ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      item.organisation.isEmpty
-                                          ? item.category
-                                          : item.organisation,
-                                    ),
                                   ],
                                 ),
-                              ),
-                              PopupMenuButton<String>(
-                                onSelected: (value) async {
-                                  if (value == 'edit') {
-                                    await _edit(item);
-                                  }
-
-                                  if (value == 'archive') {
-                                    await widget.store.update(
-                                      item.copyWith(
-                                        archived: !item.archived,
-                                      ),
-                                    );
-                                  }
-
-                                  if (value == 'delete') {
-                                    await _confirmDelete(item);
-                                  }
-                                },
-                                itemBuilder: (_) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Modifier'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'archive',
-                                    child: Text(
-                                      item.archived
-                                          ? 'Désarchiver'
-                                          : 'Archiver',
-                                    ),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Supprimer'),
-                                  ),
-                                ],
                               ),
                             ],
                           ),
@@ -9690,56 +10927,14 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                 avatar: Icon(item.status.icon, size: 18),
                                 label: Text(item.status.label),
                               ),
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.calendar_today,
-                                  size: 17,
-                                ),
-                                label: Text(
-                                  'Créée le ${_date(item.createdAt)}',
-                                ),
-                              ),
-                              if (item.reminderDate != null)
-                                Chip(
-                                  avatar: const Icon(
-                                    Icons.notifications_active,
-                                    size: 17,
-                                  ),
-                                  label: Text(
-                                    'Relance le ${_date(item.reminderDate!)}',
-                                  ),
-                                ),
-                              Chip(
-                                avatar: Icon(
-                                  _syncedProcedureIds.contains(item.id)
-                                      ? Icons.cloud_done_rounded
-                                      : Icons.cloud_off_outlined,
-                                  size: 17,
-                                  color: _syncedProcedureIds.contains(item.id)
-                                      ? Colors.green
-                                      : null,
-                                ),
-                                label: Text(
-                                  _syncedProcedureIds.contains(item.id)
-                                      ? 'Synchronisée'
-                                      : 'Non synchronisée',
-                                ),
-                              ),
                             ],
                           ),
-                          if (item.notes.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              item.notes,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
                           const SizedBox(height: 10),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
+                                  key: Key('procedure-open-${item.id}'),
                                   onPressed: () {
                                     Navigator.of(context).push(
                                       MaterialPageRoute(
@@ -9762,45 +10957,110 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              IconButton.filledTonal(
-                                tooltip: _syncedProcedureIds.contains(item.id)
-                                    ? 'Déjà sauvegardée dans le cloud'
-                                    : 'Sauvegarder dans mon espace sécurisé',
-                                onPressed:
-                                    _uploadingProcedureIds.contains(item.id)
-                                        ? null
-                                        : () => _uploadProcedure(item),
-                                icon: _uploadingProcedureIds.contains(item.id)
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Icon(
-                                        _failedProcedureIds.contains(item.id)
-                                            ? Icons.error_outline
-                                            : _syncedProcedureIds
-                                                    .contains(item.id)
-                                                ? Icons.cloud_done_rounded
-                                                : Icons.cloud_upload_outlined,
-                                        color: _syncedProcedureIds
-                                                .contains(item.id)
-                                            ? Colors.green
-                                            : _failedProcedureIds
-                                                    .contains(item.id)
-                                                ? Theme.of(context)
-                                                    .colorScheme
-                                                    .error
-                                                : null,
-                                      ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton.filledTonal(
-                                tooltip: 'Modifier le suivi',
-                                onPressed: () => _edit(item),
-                                icon: const Icon(Icons.edit_outlined),
+                              if (_uploadingProcedureIds.contains(item.id))
+                                const SizedBox.square(
+                                  dimension: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              else if (_syncedProcedureIds.contains(item.id))
+                                const Tooltip(
+                                  message: 'Synchronisée',
+                                  child: Icon(Icons.cloud_done_rounded,
+                                      color: Colors.green, size: 22),
+                                )
+                              else if (_failedProcedureIds.contains(item.id))
+                                Icon(Icons.error_outline,
+                                    color: Theme.of(context).colorScheme.error),
+                              PopupMenuButton<String>(
+                                key: Key('procedure-more-${item.id}'),
+                                tooltip: 'Plus d’actions',
+                                icon: const Icon(Icons.more_horiz_rounded),
+                                onSelected: (value) async {
+                                  if (value == 'edit') {
+                                    await _edit(item);
+                                  } else if (value == 'cloud') {
+                                    await _uploadProcedure(item);
+                                  } else if (value == 'download') {
+                                    await _downloadProcedure(item);
+                                  } else if (value == 'share') {
+                                    await _shareProcedure(item);
+                                  } else if (value == 'delete') {
+                                    await _confirmDelete(item);
+                                  } else if (value == 'advancedPrint') {
+                                    await _printProcedure(item);
+                                  } else if (value == 'advancedArchive') {
+                                    await widget.store.update(item.copyWith(
+                                        archived: !item.archived));
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: ListTile(
+                                      leading: Icon(Icons.edit_outlined),
+                                      title: Text('Modifier'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'cloud',
+                                    enabled: !_uploadingProcedureIds
+                                        .contains(item.id),
+                                    child: const ListTile(
+                                      leading:
+                                          Icon(Icons.cloud_upload_outlined),
+                                      title: Text('Cloud'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'download',
+                                    child: ListTile(
+                                      leading: Icon(Icons.download_rounded),
+                                      title: Text('Télécharger'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'share',
+                                    child: ListTile(
+                                      leading: Icon(Icons.share_outlined),
+                                      title: Text('Partager'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  const PopupMenuDivider(),
+                                  const PopupMenuItem(
+                                    value: 'advancedPrint',
+                                    child: ListTile(
+                                      leading: Icon(Icons.print_outlined),
+                                      title: Text('Imprimer'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'advancedArchive',
+                                    child: ListTile(
+                                      leading: Icon(item.archived
+                                          ? Icons.unarchive_outlined
+                                          : Icons.archive_outlined),
+                                      title: Text(item.archived
+                                          ? 'Désarchiver'
+                                          : 'Archiver'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                  const PopupMenuDivider(),
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: ListTile(
+                                      leading: Icon(Icons.delete_outline),
+                                      title: Text('Supprimer'),
+                                      dense: true,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -9976,10 +11236,70 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
+  // Conservé pour les parcours avancés existants.
+  // ignore: unused_element
+  Future<void> _downloadDocument(SavedDocument doc) async {
+    final path = doc.filePath;
+    if (path == null || !await File(path).exists()) return;
+    final extension = path.split('.').last.toLowerCase();
+    await FilePicker.platform.saveFile(
+      dialogTitle: 'Télécharger le document',
+      fileName: '${doc.title}.$extension',
+      type: FileType.custom,
+      allowedExtensions: [extension],
+      bytes: await File(path).readAsBytes(),
+    );
+  }
+
+  Future<void> _shareDocument(SavedDocument doc) async {
+    final path = doc.filePath;
+    if (path == null || !await File(path).exists()) return;
+    await SharePlus.instance
+        .share(ShareParams(files: [XFile(path)], subject: doc.title));
+  }
+
+  Future<void> _printDocument(SavedDocument doc) async {
+    final path = doc.filePath;
+    if (path == null || !await File(path).exists()) return;
+    if (!path.toLowerCase().endsWith('.pdf')) return;
+    await Printing.layoutPdf(
+        onLayout: (_) => File(path).readAsBytes(), name: doc.title);
+  }
+
+  Future<void> _confirmDeleteDocument(SavedDocument doc) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Supprimer ce document ?'),
+        content: Text('« ${doc.title} » sera supprimé définitivement.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.documentStore.remove(doc.id);
+    }
+  }
+
+  // Conservé pour les parcours avancés existants.
+  // ignore: unused_element
   Future<void> _editDocument(SavedDocument doc) async {
     final title = TextEditingController(text: doc.title);
     final organisation = TextEditingController(text: doc.organisation);
     final notes = TextEditingController(text: doc.notes);
+    final amount = TextEditingController(text: doc.detectedAmount);
+    final dueDate = TextEditingController(text: doc.detectedDueDate);
+    final reference = TextEditingController(text: doc.detectedReference);
+    String selectedDocumentType = doc.detectedDocumentType;
+    String selectedDetectedPriority = doc.detectedPriority;
     String selectedCategory = doc.category;
     String selectedStatus = doc.status;
     String selectedPriority = doc.priority;
@@ -10001,6 +11321,54 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     decoration: InputDecoration(
                         labelText: 'Titre',
                         suffixIcon: VoiceInputButton(controller: title))),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: SmartDocumentLocalAnalyzer.documentTypes
+                          .contains(selectedDocumentType)
+                      ? selectedDocumentType
+                      : 'Document inconnu',
+                  decoration: const InputDecoration(labelText: 'Type détecté'),
+                  items: SmartDocumentLocalAnalyzer.documentTypes
+                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .toList(),
+                  onChanged: (v) => setDialogState(
+                      () => selectedDocumentType = v ?? 'Document inconnu'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: amount,
+                    decoration:
+                        const InputDecoration(labelText: 'Montant total')),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: dueDate,
+                    decoration:
+                        const InputDecoration(labelText: 'Date limite')),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: reference,
+                    decoration: const InputDecoration(labelText: 'Référence')),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: const [
+                    'Aucune action urgente détectée',
+                    'À vérifier',
+                    'Échéance ou réponse proche'
+                  ].contains(selectedDetectedPriority)
+                      ? selectedDetectedPriority
+                      : 'À vérifier',
+                  decoration:
+                      const InputDecoration(labelText: 'Priorité détectée'),
+                  items: const [
+                    'Aucune action urgente détectée',
+                    'À vérifier',
+                    'Échéance ou réponse proche'
+                  ]
+                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .toList(),
+                  onChanged: (v) => setDialogState(
+                      () => selectedDetectedPriority = v ?? 'À vérifier'),
+                ),
                 const SizedBox(height: 12),
                 TextField(
                     controller: organisation,
@@ -10073,11 +11441,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         status: selectedStatus,
         priority: selectedPriority,
         notes: notes.text.trim(),
+        detectedDocumentType: selectedDocumentType,
+        detectedAmount: amount.text.trim(),
+        detectedDueDate: dueDate.text.trim(),
+        detectedReference: reference.text.trim(),
+        detectedOrganisation: organisation.text.trim(),
+        detectedPriority: selectedDetectedPriority,
+        userCorrectedAnalysis: true,
       ));
     }
     title.dispose();
     organisation.dispose();
     notes.dispose();
+    amount.dispose();
+    dueDate.dispose();
+    reference.dispose();
   }
 
   Future<void> _showDetails(SavedDocument doc) async {
@@ -10232,34 +11610,50 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(
-                      child: DropdownButtonFormField<String>(
-                    initialValue: category,
-                    decoration: const InputDecoration(labelText: 'Catégorie'),
-                    items: categories
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                        .toList(),
-                    onChanged: (value) =>
-                        setState(() => category = value ?? 'Tous'),
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: DropdownButtonFormField<String>(
-                    initialValue: sortMode,
-                    decoration: const InputDecoration(labelText: 'Trier par'),
-                    items: const [
-                      'Plus récents',
-                      'Plus anciens',
-                      'Organisme',
-                      'Priorité'
-                    ]
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                        .toList(),
-                    onChanged: (value) =>
-                        setState(() => sortMode = value ?? 'Plus récents'),
-                  )),
-                ]),
+                LayoutBuilder(builder: (context, constraints) {
+                  final narrow = constraints.maxWidth < 420;
+                  final fields = <Widget>[
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: category,
+                      decoration: const InputDecoration(labelText: 'Catégorie'),
+                      items: categories
+                          .map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (value) =>
+                          setState(() => category = value ?? 'Tous'),
+                    ),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: sortMode,
+                      decoration: const InputDecoration(labelText: 'Trier par'),
+                      items: const [
+                        'Plus récents',
+                        'Plus anciens',
+                        'Organisme',
+                        'Priorité'
+                      ]
+                          .map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (value) =>
+                          setState(() => sortMode = value ?? 'Plus récents'),
+                    ),
+                  ];
+                  if (narrow) {
+                    return Column(children: [
+                      fields.first,
+                      const SizedBox(height: 10),
+                      fields.last,
+                    ]);
+                  }
+                  return Row(children: [
+                    Expanded(child: fields.first),
+                    const SizedBox(width: 10),
+                    Expanded(child: fields.last),
+                  ]);
+                }),
                 const SizedBox(height: 16),
                 if (docs.isEmpty)
                   const Card(
@@ -10286,23 +11680,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Container(
-                                          width: 52,
-                                          height: 64,
-                                          decoration: BoxDecoration(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primaryContainer,
-                                              borderRadius:
-                                                  BorderRadius.circular(10)),
-                                          child: Icon(
-                                              doc.filePath == null
-                                                  ? Icons.description_outlined
-                                                  : Icons
-                                                      .picture_as_pdf_outlined,
-                                              size: 30),
-                                        ),
-                                        const SizedBox(width: 12),
                                         Expanded(
                                             child: Column(
                                                 crossAxisAlignment:
@@ -10313,126 +11690,135 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                                       fontWeight:
                                                           FontWeight.bold,
                                                       fontSize: 16)),
-                                              const SizedBox(height: 3),
-                                              Text(doc.organisation,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis),
                                               Text(
-                                                  '${doc.category} • ${doc.createdAt.day.toString().padLeft(2, '0')}/${doc.createdAt.month.toString().padLeft(2, '0')}/${doc.createdAt.year}'),
+                                                  '${doc.createdAt.day.toString().padLeft(2, '0')}/${doc.createdAt.month.toString().padLeft(2, '0')}/${doc.createdAt.year}'),
                                             ])),
-                                        IconButton(
-                                            onPressed: () => widget
-                                                .documentStore
-                                                .toggleFavorite(doc.id),
-                                            icon: Icon(doc.favorite
-                                                ? Icons.star
-                                                : Icons.star_border)),
                                       ]),
                                   const SizedBox(height: 10),
-                                  Wrap(spacing: 7, runSpacing: 7, children: [
-                                    Chip(
-                                        avatar: Icon(
-                                            _priorityIcon(doc.priority),
-                                            size: 17),
-                                        label: Text(doc.priority)),
-                                    Chip(
-                                        avatar: const Icon(Icons.flag_outlined,
-                                            size: 17),
-                                        label: Text(doc.status)),
-                                    if (doc.deadline != null)
-                                      Chip(
-                                          avatar:
-                                              const Icon(Icons.event, size: 17),
-                                          label: Text(doc.deadline!)),
-                                  ]),
-                                  if (doc.extractedText.isNotEmpty)
-                                    Padding(
-                                        padding: const EdgeInsets.only(top: 6),
-                                        child: Text(
-                                            doc.extractedText.length > 145
-                                                ? '${doc.extractedText.substring(0, 145)}…'
-                                                : doc.extractedText,
-                                            maxLines: 3,
-                                            overflow: TextOverflow.ellipsis)),
-                                  if (doc.notes.isNotEmpty)
-                                    Padding(
-                                        padding: const EdgeInsets.only(top: 8),
-                                        child: Row(children: [
-                                          const Icon(
-                                              Icons.sticky_note_2_outlined,
-                                              size: 18),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                              child: Text(doc.notes,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis))
-                                        ])),
-                                  const SizedBox(height: 10),
-                                  Wrap(spacing: 8, runSpacing: 8, children: [
-                                    OutlinedButton.icon(
-                                        onPressed: () => _editDocument(doc),
-                                        icon: const Icon(Icons.edit_outlined),
-                                        label: const Text('Modifier')),
-                                    if (doc.filePath != null)
-                                      OutlinedButton.icon(
-                                          onPressed: () => _openFile(doc),
-                                          icon: const Icon(
-                                              Icons.visibility_outlined),
-                                          label: const Text('Aperçu')),
-                                    if (doc.filePath != null)
-                                      IconButton.filledTonal(
-                                          tooltip: 'Partager',
-                                          onPressed: () => SharePlus.instance
-                                              .share(ShareParams(
-                                                  files: [XFile(doc.filePath!)],
-                                                  subject: doc.title)),
-                                          icon:
-                                              const Icon(Icons.share_outlined)),
-                                    IconButton.filledTonal(
-                                      key: Key('document-cloud-${doc.id}'),
-                                      tooltip: _failedDocumentIds
-                                              .contains(doc.id)
-                                          ? 'Échec - réessayer'
-                                          : _syncedDocumentIds.contains(doc.id)
-                                              ? 'Synchronisé'
-                                              : 'Envoyer dans le cloud',
-                                      onPressed:
-                                          _uploadingDocumentIds.contains(doc.id)
-                                              ? null
-                                              : () => _uploadDocument(doc),
-                                      icon: _uploadingDocumentIds
-                                              .contains(doc.id)
-                                          ? const SizedBox.square(
-                                              dimension: 20,
-                                              child: CircularProgressIndicator(
-                                                  strokeWidth: 2))
-                                          : Icon(
-                                              _failedDocumentIds
-                                                      .contains(doc.id)
-                                                  ? Icons.error_outline
-                                                  : _syncedDocumentIds
-                                                          .contains(doc.id)
-                                                      ? Icons.cloud_done_rounded
-                                                      : Icons
-                                                          .cloud_upload_outlined,
-                                              color: _syncedDocumentIds
-                                                      .contains(doc.id)
-                                                  ? Colors.green
-                                                  : _failedDocumentIds
-                                                          .contains(doc.id)
-                                                      ? Theme.of(context)
-                                                          .colorScheme
-                                                          .error
-                                                      : null,
-                                            ),
+                                  Row(children: [
+                                    Tooltip(
+                                      message: doc.filePath == null
+                                          ? 'Ouvrir'
+                                          : 'Aperçu',
+                                      child: OutlinedButton.icon(
+                                        key: Key('document-preview-${doc.id}'),
+                                        onPressed: () => doc.filePath == null
+                                            ? _showDetails(doc)
+                                            : _openFile(doc),
+                                        icon: Icon(doc.filePath == null
+                                            ? Icons.open_in_new_rounded
+                                            : Icons.visibility_outlined),
+                                        label: Text(doc.filePath == null
+                                            ? 'Ouvrir'
+                                            : 'Aperçu'),
+                                      ),
                                     ),
-                                    IconButton.filledTonal(
-                                        tooltip: 'Supprimer',
-                                        onPressed: () =>
-                                            widget.documentStore.remove(doc.id),
-                                        icon: const Icon(Icons.delete_outline)),
+                                    const Spacer(),
+                                    if (_uploadingDocumentIds.contains(doc.id))
+                                      const Padding(
+                                        padding: EdgeInsets.all(12),
+                                        child: SizedBox.square(
+                                          dimension: 18,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        ),
+                                      )
+                                    else if (_syncedDocumentIds
+                                        .contains(doc.id))
+                                      const Tooltip(
+                                        message: 'Synchronisé',
+                                        child: Icon(Icons.cloud_done_rounded,
+                                            color: Colors.green, size: 22),
+                                      )
+                                    else if (_failedDocumentIds
+                                        .contains(doc.id))
+                                      Icon(Icons.error_outline,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .error,
+                                          size: 22),
+                                    PopupMenuButton<String>(
+                                      key: Key('document-more-${doc.id}'),
+                                      tooltip: 'Plus d’actions',
+                                      icon:
+                                          const Icon(Icons.more_horiz_rounded),
+                                      onSelected: (value) {
+                                        if (value == 'cloud') {
+                                          _uploadDocument(doc);
+                                        } else if (value == 'share') {
+                                          _shareDocument(doc);
+                                        } else if (value == 'print') {
+                                          _printDocument(doc);
+                                        } else if (value == 'advancedEdit') {
+                                          _editDocument(doc);
+                                        } else if (value ==
+                                            'advancedDownload') {
+                                          _downloadDocument(doc);
+                                        } else if (value == 'delete') {
+                                          _confirmDeleteDocument(doc);
+                                        }
+                                      },
+                                      itemBuilder: (_) => [
+                                        PopupMenuItem(
+                                          value: 'cloud',
+                                          enabled: !_uploadingDocumentIds
+                                              .contains(doc.id),
+                                          child: const ListTile(
+                                            leading: Icon(
+                                                Icons.cloud_upload_outlined),
+                                            title: Text('Cloud / Synchroniser'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'share',
+                                          enabled: doc.filePath != null,
+                                          child: const ListTile(
+                                            leading: Icon(Icons.share_outlined),
+                                            title: Text('Partager'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'print',
+                                          enabled: doc.filePath != null,
+                                          child: const ListTile(
+                                            leading: Icon(Icons.print_outlined),
+                                            title: Text('Imprimer'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                        const PopupMenuDivider(),
+                                        const PopupMenuItem(
+                                          value: 'advancedEdit',
+                                          child: ListTile(
+                                            leading: Icon(Icons.edit_outlined),
+                                            title: Text(
+                                                'Modifier les informations'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'advancedDownload',
+                                          enabled: doc.filePath != null,
+                                          child: const ListTile(
+                                            leading:
+                                                Icon(Icons.download_rounded),
+                                            title: Text('Télécharger'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                        const PopupMenuDivider(),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: ListTile(
+                                            leading: Icon(Icons.delete_outline),
+                                            title: Text('Supprimer'),
+                                            dense: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ]),
                                 ]),
                           ),
@@ -10525,6 +11911,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       fields.map((key, value) => MapEntry(key, value.text)),
     );
 
+    try {
+      await _authService?.updateProfile({
+        'first_name': fields['firstName']!.text.trim(),
+        'last_name': fields['lastName']!.text.trim(),
+        'display_name':
+            '${fields['firstName']!.text.trim()} ${fields['lastName']!.text.trim()}'
+                .trim(),
+      });
+    } on AuthOperationException catch (error) {
+      if (!mounted) return;
+      _showAuthMessage(error.displayMessage);
+      return;
+    }
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -10533,70 +11933,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _submitAccount() async {
-    if (!_supabaseReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Supabase n’est pas configuré dans cette version.'),
-        ),
-      );
+    final service = _authService;
+    if (!_supabaseReady || service == null) {
+      _showAuthMessage(_supabaseInitializationError == null
+          ? 'Le service de compte n’est pas configuré.'
+          : kDebugMode
+              ? 'Service temporairement indisponible.\n[DEBUG] fonction=Supabase.initialize\n$_supabaseInitializationError'
+              : 'Service temporairement indisponible.');
       return;
     }
 
     final email = _accountEmailController.text.trim();
     final password = _accountPasswordController.text;
 
-    if (email.isEmpty || password.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Saisissez une adresse e-mail et un mot de passe de 6 caractères minimum.',
-          ),
-        ),
-      );
-      return;
-    }
-
     setState(() => _authBusy = true);
 
     try {
       if (_createAccountMode) {
-        await Supabase.instance.client.auth.signUp(
+        final result = await service.signUp(
           email: email,
           password: password,
+          metadata: {
+            'first_name': fields['firstName']!.text.trim(),
+            'last_name': fields['lastName']!.text.trim(),
+          },
         );
+        if (!mounted) return;
+        _showAuthMessage(result.emailConfirmationRequired
+            ? 'Compte créé. Vérifiez votre e-mail pour confirmer votre compte.'
+            : 'Compte créé et connexion réussie.');
       } else {
-        await Supabase.instance.client.auth.signInWithPassword(
+        await service.signIn(
           email: email,
           password: password,
         );
+        if (!mounted) return;
+        _showAuthMessage('Connexion réussie.');
       }
 
       if (!mounted) return;
 
       setState(() {});
       _accountPasswordController.clear();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _createAccountMode
-                ? 'Compte créé. Vérifiez votre e-mail si une confirmation est demandée.'
-                : 'Connexion réussie.',
-          ),
-        ),
-      );
-    } on AuthException catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+    } on AuthOperationException catch (error) {
+      if (mounted) _showAuthMessage(error.displayMessage);
     } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connexion impossible : $error')),
-      );
+      if (mounted) {
+        _showAuthMessage(ProfessionalAuthService.mapError(
+          error,
+          operation: _createAccountMode ? 'signUp' : 'signIn',
+        ).displayMessage);
+      }
     } finally {
       if (mounted) {
         setState(() => _authBusy = false);
@@ -10605,8 +11992,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
-    if (!_supabaseReady) return;
-    await Supabase.instance.client.auth.signOut();
+    final service = _authService;
+    if (!_supabaseReady || service == null) return;
+    setState(() => _authBusy = true);
+    try {
+      await service.signOut();
+    } on AuthOperationException catch (error) {
+      if (mounted) _showAuthMessage(error.displayMessage);
+      return;
+    } finally {
+      if (mounted) setState(() => _authBusy = false);
+    }
 
     if (!mounted) return;
 
@@ -10617,19 +12013,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _showAuthMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _resetPassword() async {
+    final service = _authService;
+    if (service == null) {
+      _showAuthMessage('Service temporairement indisponible.');
+      return;
+    }
+    setState(() => _authBusy = true);
+    try {
+      await service.sendPasswordReset(_accountEmailController.text);
+      if (mounted) {
+        _showAuthMessage(
+            'E-mail de récupération envoyé. Vérifiez aussi vos courriers indésirables.');
+      }
+    } on AuthOperationException catch (error) {
+      if (mounted) _showAuthMessage(error.displayMessage);
+    } finally {
+      if (mounted) setState(() => _authBusy = false);
+    }
+  }
+
+  Future<void> _changePassword() async {
+    final controller = TextEditingController();
+    final password = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Changer le mot de passe'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nouveau mot de passe',
+            helperText: '6 caractères minimum',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Mettre à jour'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (password == null || !mounted) return;
+    setState(() => _authBusy = true);
+    try {
+      await _authService!.updatePassword(password);
+      if (mounted) _showAuthMessage('Mot de passe mis à jour.');
+    } on AuthOperationException catch (error) {
+      if (mounted) _showAuthMessage(error.displayMessage);
+    } finally {
+      if (mounted) setState(() => _authBusy = false);
+    }
+  }
+
   Future<void> _storeSignature(Uint8List bytes) async {
     if (bytes.length > 5 * 1024 * 1024) {
       throw const FileSystemException(
           'La signature dépasse la taille maximale de 5 Mo.');
     }
     await widget.settings.saveSignatureBytes(bytes);
+    final normalizedBytes =
+        await File(widget.settings.signaturePath).readAsBytes();
     final user = _currentSupabaseUser;
     if (_supabaseReady && user != null) {
       await Supabase.instance.client.storage
           .from('admin-documents')
           .uploadBinary(
             '${user.id}/profile/signature.png',
-            bytes,
+            normalizedBytes,
             fileOptions: const FileOptions(
               upsert: true,
               contentType: 'image/png',
@@ -10754,9 +12218,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Text(user.email ?? 'Compte connecté'),
                     const SizedBox(height: 12),
                     FilledButton.tonalIcon(
-                      onPressed: _signOut,
+                      onPressed: _authBusy ? null : _signOut,
                       icon: const Icon(Icons.logout_rounded),
                       label: const Text('Se déconnecter'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      key: const Key('auth-change-password'),
+                      onPressed: _authBusy ? null : _changePassword,
+                      icon: const Icon(Icons.password_rounded),
+                      label: const Text('Changer le mot de passe'),
                     ),
                   ] else ...[
                     SegmentedButton<bool>(
@@ -10819,6 +12290,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             : 'Se connecter',
                       ),
                     ),
+                    if (!_createAccountMode) ...[
+                      const SizedBox(height: 6),
+                      TextButton(
+                        key: const Key('auth-reset-password'),
+                        onPressed: _authBusy ? null : _resetPassword,
+                        child: const Text('Mot de passe oublié ?'),
+                      ),
+                    ],
                   ],
                 ],
               ),
@@ -10847,12 +12326,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Colors.grey.shade200,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.black12),
                       ),
                       child: Image.file(File(widget.settings.signaturePath),
                           fit: BoxFit.contain),
+                    ),
+                    const SizedBox(height: 6),
+                    const Row(
+                      key: Key('signature-transparent-indicator'),
+                      children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 18, color: Colors.green),
+                        SizedBox(width: 6),
+                        Text('Fond transparent'),
+                      ],
                     ),
                     SwitchListTile(
                       key: const Key('auto-signature-switch'),
@@ -11055,7 +12543,7 @@ class LetterGenerator {
     required String reference,
     required String details,
   }) {
-    final sender = '$firstName $lastName'.trim();
+    final sender = capitalizeProfileName('$firstName $lastName');
     final selectedModel = model ?? template.models.first;
     final subject = selectedModel.subject;
     final body = selectedModel.body;

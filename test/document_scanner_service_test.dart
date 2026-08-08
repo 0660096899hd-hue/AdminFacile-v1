@@ -1,0 +1,65 @@
+import 'package:admin_facile/document_scanner_service.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('adminfacile/mlkit_document_scanner_test');
+  const service = AndroidMlKitDocumentScannerService(channel: channel);
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
+
+  test('V19.0 retourne toutes les images finales du scan multipage', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'scan');
+      expect(call.arguments, {'pageLimit': 10});
+      return {
+        'imagePaths': ['page_1.jpg', 'page_2.jpg', 'page_3.jpg'],
+        'pageCount': 3,
+      };
+    });
+
+    final result = await service.scan();
+    expect(result, isNotNull);
+    expect(result!.pageCount, 3);
+    expect(result.imagePaths.last, 'page_3.jpg');
+  });
+
+  test('V19.0 traite une annulation sans erreur', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => null);
+    expect(await service.scan(), isNull);
+  });
+
+  test('V19.0 transforme une indisponibilité native en fallback lisible',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(code: 'MLKIT_UNAVAILABLE');
+    });
+
+    await expectLater(
+      service.scan(),
+      throwsA(isA<DocumentScannerUnavailableException>().having(
+        (error) => error.toString(),
+        'message',
+        DocumentScannerUnavailableException.message,
+      )),
+    );
+  });
+
+  test('V19.0 refuse un résultat vide sans perdre le document courant',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            channel, (_) async => {'imagePaths': <String>[]});
+    await expectLater(
+      service.scan(),
+      throwsA(isA<DocumentScannerUnavailableException>()),
+    );
+  });
+}
