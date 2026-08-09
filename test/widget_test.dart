@@ -1494,9 +1494,9 @@ void main() {
     final source = File('lib/main.dart').readAsStringSync();
     final service =
         File('lib/document_scanner_service.dart').readAsStringSync();
-    final android = File(
-            'android/app/src/main/kotlin/com/example/admin_facile/MainActivity.kt')
-        .readAsStringSync();
+    final android =
+        File('android/app/src/main/kotlin/fr/adminfacile/app/MainActivity.kt')
+            .readAsStringSync();
     expect(
         service, contains('abstract interface class DocumentScannerService'));
     expect(service, contains('AndroidMlKitDocumentScannerService'));
@@ -1512,7 +1512,7 @@ void main() {
     expect(source, isNot(contains('adminfacile/professional_scanner')));
     expect(File('lib/document_edge_geometry.dart').existsSync(), isFalse);
     expect(
-        File('android/app/src/main/kotlin/com/example/admin_facile/ProfessionalScannerActivity.kt')
+        File('android/app/src/main/kotlin/fr/adminfacile/app/ProfessionalScannerActivity.kt')
             .existsSync(),
         isFalse);
   });
@@ -1561,6 +1561,91 @@ void main() {
     expect(
       cloudOperationMessage(Exception('jeton sensible')),
       'Le service cloud est momentanément indisponible.',
+    );
+  });
+
+  test('V20.1 prépare une signature release sans clé debug', () {
+    final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+    final ignore = File('.gitignore').readAsStringSync();
+    final example = File('android/key.properties.example').readAsStringSync();
+
+    expect(gradle, contains('releasePropertiesFile'));
+    expect(gradle, contains('signingConfigs.getByName("release")'));
+    expect(gradle, isNot(contains('signingConfigs.getByName("debug")')));
+    expect(ignore, contains('/android/key.properties'));
+    expect(ignore, contains('/android/app/*.jks'));
+    expect(example, contains('[À COMPLÉTER]'));
+    expect(File('android/key.properties').existsSync(), isFalse);
+  });
+
+  test('V20.1 conserve uniquement les permissions Android nécessaires', () {
+    final manifest =
+        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+
+    expect(manifest, contains('android.permission.INTERNET'));
+    expect(manifest, contains('android.permission.RECORD_AUDIO'));
+    expect(manifest, isNot(contains('android.permission.CAMERA')));
+    expect(manifest, isNot(contains('READ_EXTERNAL_STORAGE')));
+    expect(manifest, isNot(contains('WRITE_EXTERNAL_STORAGE')));
+    expect(manifest, isNot(contains('READ_MEDIA_')));
+    expect(manifest, isNot(contains('POST_NOTIFICATIONS')));
+  });
+
+  test('V20.1 utilise la marque AdminFacile pour icône et splash', () {
+    final adaptive = File(
+      'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+    ).readAsStringSync();
+    final android12 = File(
+      'android/app/src/main/res/values-v31/styles.xml',
+    ).readAsStringSync();
+
+    expect(adaptive, contains('@drawable/ic_launcher_foreground'));
+    expect(adaptive, contains('@color/adminfacile_icon_background'));
+    expect(android12, contains('android:windowSplashScreenAnimatedIcon'));
+    expect(android12, contains('@drawable/adminfacile_splash'));
+    expect(
+      File('android/app/src/main/res/drawable/adminfacile_mark.png')
+          .existsSync(),
+      isTrue,
+    );
+    expect(
+      File('android/app/src/main/res/drawable/adminfacile_splash.png')
+          .existsSync(),
+      isTrue,
+    );
+  });
+
+  test('V20.2 utilise le package Android définitif', () {
+    final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+    final manifest =
+        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+    final mainActivityPath =
+        'android/app/src/main/kotlin/fr/adminfacile/app/MainActivity.kt';
+    final mainActivity = File(mainActivityPath).readAsStringSync();
+    final scannerService =
+        File('lib/document_scanner_service.dart').readAsStringSync();
+
+    expect(gradle, contains('namespace = "fr.adminfacile.app"'));
+    expect(gradle, contains('applicationId = "fr.adminfacile.app"'));
+    expect(mainActivity, startsWith('package fr.adminfacile.app'));
+    expect(manifest, contains('android:name=".MainActivity"'));
+    expect(
+      File(
+        'android/app/src/main/kotlin/com/example/admin_facile/MainActivity.kt',
+      ).existsSync(),
+      isFalse,
+    );
+    expect(
+      '$gradle\n$manifest\n$mainActivity\n$scannerService',
+      isNot(contains('com.example.admin_facile')),
+    );
+    expect(
+      mainActivity,
+      contains('"adminfacile/mlkit_document_scanner"'),
+    );
+    expect(
+      scannerService,
+      contains("MethodChannel('adminfacile/mlkit_document_scanner')"),
     );
   });
 }

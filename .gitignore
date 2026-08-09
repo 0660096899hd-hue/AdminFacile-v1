@@ -43,6 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/build/
+
+# Android release signing secrets
+/android/key.properties
+/android/app/*.jks
+/android/app/*.keystore
 
 # Kotlin compiler session markers
 android/.kotlin/

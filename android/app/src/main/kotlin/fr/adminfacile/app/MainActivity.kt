@@ -1,4 +1,4 @@
-package com.example.admin_facile
+package fr.adminfacile.app
 
 import android.app.Activity
 import android.content.Intent

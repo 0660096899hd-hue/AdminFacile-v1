@@ -1,0 +1,6 @@
+# Copiez ce fichier vers android/key.properties sans jamais le versionner.
+# Utilisez des mots de passe forts et stockez-les dans un gestionnaire de secrets.
+storePassword=[À COMPLÉTER]
+keyPassword=[À COMPLÉTER]
+keyAlias=adminfacile-upload
+storeFile=[CHEMIN ABSOLU VERS adminfacile-upload.jks]
