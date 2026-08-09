@@ -53,6 +53,17 @@ User? get _currentSupabaseUser =>
 String procedureCloudPath(String userId, String procedureId) =>
     '$userId/procedures/$procedureId.pdf';
 
+String cloudOperationMessage(Object error) {
+  if (error is TimeoutException) {
+    return 'Le service cloud met trop de temps à répondre. Réessayez.';
+  }
+  if (error is SocketException) return 'Vérifiez votre connexion Internet.';
+  if (error is AuthException) {
+    return 'Votre session cloud n’est plus valide. Reconnectez-vous.';
+  }
+  return 'Le service cloud est momentanément indisponible.';
+}
+
 enum ProcedureCloudState { notSynced, uploading, synced, failed }
 
 enum ProcedureStatus { created, sent, waiting, reminder, completed }
@@ -447,26 +458,7 @@ Future<void> main() async {
   final procedureStore = appProcedureStore;
 
   await settings.load();
-  if (settings.signatureMigratedOnLoad &&
-      settings.hasSignature &&
-      _currentSupabaseUser != null) {
-    try {
-      await Supabase.instance.client.storage
-          .from('admin-documents')
-          .uploadBinary(
-            '${_currentSupabaseUser!.id}/profile/signature.png',
-            await File(settings.signaturePath).readAsBytes(),
-            fileOptions: const FileOptions(
-              upsert: true,
-              contentType: 'image/png',
-            ),
-          );
-    } catch (error) {
-      debugPrint('Synchronisation de la signature migrée impossible : $error');
-    }
-  }
-  await documentStore.load();
-  await procedureStore.load();
+  await Future.wait([documentStore.load(), procedureStore.load()]);
 
   runApp(
     AdminFacileApp(
@@ -475,6 +467,32 @@ Future<void> main() async {
       procedureStore: procedureStore,
     ),
   );
+
+  // La synchronisation réseau ne doit jamais retarder le premier écran.
+  if (settings.signatureMigratedOnLoad && settings.hasSignature) {
+    unawaited(_syncMigratedSignature(settings));
+  }
+}
+
+Future<void> _syncMigratedSignature(AppSettings settings) async {
+  final user = _currentSupabaseUser;
+  if (user == null) return;
+  try {
+    final bytes = await File(settings.signaturePath).readAsBytes();
+    await Supabase.instance.client.storage
+        .from('admin-documents')
+        .uploadBinary(
+          '${user.id}/profile/signature.png',
+          bytes,
+          fileOptions: const FileOptions(
+            upsert: true,
+            contentType: 'image/png',
+          ),
+        )
+        .timeout(const Duration(seconds: 20));
+  } catch (error) {
+    debugPrint('Synchronisation de la signature migrée impossible : $error');
+  }
 }
 
 enum AppThemePreference { system, light, dark }
@@ -702,7 +720,7 @@ class AdminFacileApp extends StatelessWidget {
       animation: settings,
       builder: (_, __) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'AdminFacile V11.0',
+        title: 'AdminFacile',
         themeMode: settings.themePreference.themeMode,
         theme: _buildAdminTheme(Brightness.light, settings.comfortMode),
         darkTheme: _buildAdminTheme(Brightness.dark, settings.comfortMode),
@@ -1267,13 +1285,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
   }
 
   Future<void> _loadModels() async {
-    final raw = await rootBundle.loadString('assets/letters/library.json');
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    final loaded = (data['templates'] as List<dynamic>)
-        .map((e) =>
-            JsonLetterRecord.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList()
-      ..addAll(V173LetterCatalog.additionalRecords);
+    final loaded = await BundledLetterCatalog.load();
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
@@ -8829,6 +8841,34 @@ class JsonLetterRecord {
       );
 }
 
+/// Cache partagé du catalogue embarqué.
+///
+/// Les différents écrans de recherche utilisaient auparavant chacun une
+/// lecture disque et un décodage JSON des 500+ modèles. Le catalogue étant
+/// immuable pendant l'exécution, une seule future partagée suffit.
+class BundledLetterCatalog {
+  BundledLetterCatalog._();
+
+  static Future<List<JsonLetterRecord>>? _cachedRecords;
+
+  static Future<List<JsonLetterRecord>> load() =>
+      _cachedRecords ??= _loadFromAssets();
+
+  static Future<List<JsonLetterRecord>> _loadFromAssets() async {
+    final raw = await rootBundle.loadString('assets/letters/library.json');
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    final records = (data['templates'] as List<dynamic>)
+        .map(
+          (entry) => JsonLetterRecord.fromJson(
+            Map<String, dynamic>.from(entry as Map),
+          ),
+        )
+        .toList(growable: true)
+      ..addAll(V173LetterCatalog.additionalRecords);
+    return List<JsonLetterRecord>.unmodifiable(records);
+  }
+}
+
 class V173LetterCatalog {
   static const categories = <String>[
     'Administration',
@@ -9213,13 +9253,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
   }
 
   Future<List<JsonLetterRecord>> _loadBundledRecords() async {
-    final raw = await rootBundle.loadString('assets/letters/library.json');
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    return (data['templates'] as List<dynamic>)
-        .map((e) =>
-            JsonLetterRecord.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList()
-      ..addAll(V173LetterCatalog.additionalRecords);
+    return BundledLetterCatalog.load();
   }
 
   Future<void> _toggleFavorite(String id) async {
@@ -10649,14 +10683,17 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       final bytes = await _procedurePdf(item);
       final cloudPath = procedureCloudPath(user.id, item.id);
 
-      await client.storage.from('admin-documents').uploadBinary(
+      await client.storage
+          .from('admin-documents')
+          .uploadBinary(
             cloudPath,
             bytes,
             fileOptions: const FileOptions(
               contentType: 'application/pdf',
               upsert: true,
             ),
-          );
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
 
@@ -10678,7 +10715,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       setState(() => _failedProcedureIds.add(item.id));
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sauvegarde impossible : $error')),
+        SnackBar(content: Text(cloudOperationMessage(error))),
       );
     } finally {
       if (mounted) {
@@ -11223,13 +11260,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             '${user.id}/documents/${doc.id}.$extension',
             bytes,
             fileOptions: FileOptions(contentType: contentType, upsert: true),
-          );
+          )
+          .timeout(const Duration(seconds: 30));
       if (mounted) setState(() => _syncedDocumentIds.add(doc.id));
     } catch (error) {
       if (mounted) {
         setState(() => _failedDocumentIds.add(doc.id));
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Envoi cloud impossible : $error')));
+          SnackBar(content: Text(cloudOperationMessage(error))),
+        );
       }
     } finally {
       if (mounted) setState(() => _uploadingDocumentIds.remove(doc.id));
@@ -12089,16 +12128,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await File(widget.settings.signaturePath).readAsBytes();
     final user = _currentSupabaseUser;
     if (_supabaseReady && user != null) {
-      await Supabase.instance.client.storage
-          .from('admin-documents')
-          .uploadBinary(
-            '${user.id}/profile/signature.png',
-            normalizedBytes,
-            fileOptions: const FileOptions(
-              upsert: true,
-              contentType: 'image/png',
+      try {
+        await Supabase.instance.client.storage
+            .from('admin-documents')
+            .uploadBinary(
+              '${user.id}/profile/signature.png',
+              normalizedBytes,
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/png',
+              ),
+            )
+            .timeout(const Duration(seconds: 20));
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Signature enregistrée sur ce téléphone. '
+                '${cloudOperationMessage(error)}',
+              ),
             ),
           );
+        }
+      }
     }
     if (mounted) setState(() {});
   }
@@ -12155,7 +12208,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       try {
         await Supabase.instance.client.storage
             .from('admin-documents')
-            .remove(['${user.id}/profile/signature.png']);
+            .remove(['${user.id}/profile/signature.png']).timeout(
+                const Duration(seconds: 20));
       } catch (_) {
         // La copie locale est supprimée même si le réseau est indisponible.
       }

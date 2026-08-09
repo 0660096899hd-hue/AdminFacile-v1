@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -1525,5 +1526,41 @@ void main() {
     expect(call, greaterThan(0));
     expect(scan.substring(0, call), isNot(contains('pdfPath = null')));
     expect(scan, contains('DocumentScannerUnavailableException.message'));
+  });
+
+  test('V20.0 partage un cache unique pour le catalogue de modèles', () {
+    final source = File('lib/main.dart').readAsStringSync();
+
+    expect(source, contains('class BundledLetterCatalog'));
+    expect(source, contains('_cachedRecords ??= _loadFromAssets()'));
+    expect(
+      RegExp(r'BundledLetterCatalog\.load\(\)').allMatches(source).length,
+      greaterThanOrEqualTo(2),
+    );
+  });
+
+  test('V20.0 ne bloque pas le démarrage sur la synchronisation cloud', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final runAppPosition = source.indexOf('runApp(');
+    final syncPosition = source.indexOf('unawaited(_syncMigratedSignature');
+
+    expect(runAppPosition, greaterThan(0));
+    expect(syncPosition, greaterThan(runAppPosition));
+    expect(source, contains('.timeout(const Duration(seconds: 20))'));
+  });
+
+  test('V20.0 traduit les erreurs cloud sans exposer de détail technique', () {
+    expect(
+      cloudOperationMessage(TimeoutException('secret technique')),
+      'Le service cloud met trop de temps à répondre. Réessayez.',
+    );
+    expect(
+      cloudOperationMessage(const SocketException('hôte privé')),
+      'Vérifiez votre connexion Internet.',
+    );
+    expect(
+      cloudOperationMessage(Exception('jeton sensible')),
+      'Le service cloud est momentanément indisponible.',
+    );
   });
 }
