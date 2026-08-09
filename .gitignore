@@ -52,3 +52,8 @@ app.*.map.json
 
 # Kotlin compiler session markers
 android/.kotlin/
+
+# Flutter local generated files
+.dart-tool/
+.flutter
+.flutter_tool_state
