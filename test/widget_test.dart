@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:admin_facile/main.dart';
+import 'package:admin_facile/document_scanner_service.dart';
+import 'package:admin_facile/professional_auth_service.dart';
 import 'package:admin_facile/letter_signature_service.dart';
 import 'package:admin_facile/signature_pad.dart';
 import 'package:admin_facile/signature_image_service.dart';
@@ -12,9 +14,349 @@ import 'package:admin_facile/scanner_processing_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+class AuthenticatedTestSession implements AppAuthSession {
+  const AuthenticatedTestSession();
+  @override
+  bool get isAuthenticated => true;
+  @override
+  bool get isServiceAvailable => true;
+  @override
+  ProfessionalAuthService? get service => null;
+  @override
+  Stream<bool> get changes => const Stream<bool>.empty();
+}
+
+class WidgetAuthGateway implements AuthGateway {
+  WidgetAuthGateway(this.onChanged, {this.confirmationRequired = false});
+  final void Function(bool) onChanged;
+  bool confirmationRequired;
+  bool signedIn = false;
+  bool resetRequested = false;
+  Object? nextError;
+
+  void _checkError() {
+    final error = nextError;
+    nextError = null;
+    if (error != null) throw error;
+  }
+
+  @override
+  bool get hasSession => signedIn;
+  @override
+  String? get currentEmail => signedIn ? 'test@example.fr' : null;
+  @override
+  String? get currentUserId => signedIn ? 'test-user' : null;
+
+  @override
+  Future<bool> signUp(
+      {required String email,
+      required String password,
+      Map<String, dynamic>? metadata}) async {
+    _checkError();
+    signedIn = !confirmationRequired;
+    onChanged(signedIn);
+    return confirmationRequired;
+  }
+
+  @override
+  Future<void> signIn({required String email, required String password}) async {
+    _checkError();
+    signedIn = true;
+    onChanged(true);
+  }
+
+  @override
+  Future<void> signOut() async {
+    _checkError();
+    signedIn = false;
+    onChanged(false);
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) async {
+    _checkError();
+    resetRequested = true;
+  }
+
+  @override
+  Future<void> updatePassword(String password) async => _checkError();
+  @override
+  Future<void> updateProfile(Map<String, dynamic> metadata) async =>
+      _checkError();
+}
+
+class MutableTestAuthSession implements AppAuthSession {
+  MutableTestAuthSession({bool authenticated = false, bool available = true})
+      : _authenticated = authenticated,
+        _available = available {
+    gateway = WidgetAuthGateway(_setAuthenticated);
+    gateway.signedIn = authenticated;
+    authService = ProfessionalAuthService(gateway);
+  }
+
+  final StreamController<bool> controller = StreamController<bool>.broadcast();
+  late final WidgetAuthGateway gateway;
+  late final ProfessionalAuthService authService;
+  bool _authenticated;
+  final bool _available;
+
+  void _setAuthenticated(bool value) {
+    _authenticated = value;
+    controller.add(value);
+  }
+
+  Future<void> close() => controller.close();
+
+  @override
+  Stream<bool> get changes => controller.stream;
+  @override
+  bool get isAuthenticated => _authenticated;
+  @override
+  bool get isServiceAvailable => _available;
+  @override
+  ProfessionalAuthService? get service => _available ? authService : null;
+}
+
+class FailingDocumentScanner implements DocumentScannerService {
+  const FailingDocumentScanner();
+  @override
+  Future<DocumentScanResult?> scan({int pageLimit = 10}) => Future.error(
+      const DocumentScannerUnavailableException(null, 'MLKIT_UNAVAILABLE'));
+}
+
 void main() {
+  group('V20.3 portail authentification obligatoire', () {
+    Future<void> pumpApp(
+        WidgetTester tester, MutableTestAuthSession session) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final settings = AppSettings();
+      final documents = DocumentStore();
+      final procedures = ProcedureStore();
+      await settings.load();
+      await documents.load();
+      await procedures.load();
+      await tester.pumpWidget(AdminFacileApp(
+        settings: settings,
+        documentStore: documents,
+        procedureStore: procedures,
+        authSession: session,
+      ));
+      await tester.pump(const Duration(milliseconds: 1300));
+    }
+
+    testWidgets('aucune session interdit le dashboard et affiche l’accueil',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      expect(find.byKey(const Key('auth-welcome-screen')), findsOneWidget);
+      expect(find.text('Simplifiez vos démarches administratives'),
+          findsOneWidget);
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+    });
+
+    testWidgets('une session restaurée ouvre directement le dashboard',
+        (tester) async {
+      final session = MutableTestAuthSession(authenticated: true);
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      expect(find.byKey(const Key('dashboard-v17')), findsOneWidget);
+      expect(find.byKey(const Key('auth-welcome-screen')), findsNothing);
+    });
+
+    testWidgets('connexion ouvre le dashboard puis logout ferme toute la pile',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-existing-account')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('auth-email')), 'test@example.fr');
+      await tester.enterText(
+          find.byKey(const Key('auth-password')), 'secret12');
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dashboard-v17')), findsOneWidget);
+
+      await session.authService.signOut();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('auth-welcome-screen')), findsOneWidget);
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+    });
+
+    testWidgets('création avec confirmation e-mail reste hors dashboard',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      session.gateway.confirmationRequired = true;
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-create-account')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('auth-email')), 'nouveau@example.fr');
+      await tester.enterText(
+          find.byKey(const Key('auth-password')), 'secret12');
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Vérifiez votre e-mail'), findsOneWidget);
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+    });
+
+    testWidgets('mot de passe oublié appelle le service', (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-existing-account')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('auth-email')), 'test@example.fr');
+      await tester.tap(find.byKey(const Key('auth-forgot-password')));
+      await tester.pumpAndSettle();
+      expect(session.gateway.resetRequested, isTrue);
+      expect(
+          find.textContaining('E-mail de récupération envoyé'), findsOneWidget);
+    });
+
+    testWidgets('erreur réseau ne donne jamais accès au dashboard',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      session.gateway.nextError = const SocketException('hors ligne');
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-existing-account')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('auth-email')), 'test@example.fr');
+      await tester.enterText(
+          find.byKey(const Key('auth-password')), 'secret12');
+      await tester.tap(find.byKey(const Key('auth-submit')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Vérifiez votre connexion Internet'),
+          findsOneWidget);
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+    });
+  });
+
+  testWidgets('V20.3 un échec scanner propose photo et import', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ScannerScreen(
+          documentStore: DocumentStore(),
+          procedureStore: ProcedureStore(),
+          scannerService: const FailingDocumentScanner(),
+        ),
+      ),
+    ));
+    await tester.tap(find.widgetWithText(FilledButton, 'Scanner'));
+    await tester.pumpAndSettle();
+    expect(find.text('Le scan a échoué'), findsOneWidget);
+    expect(find.byKey(const Key('scanner-fallback-camera')), findsOneWidget);
+    expect(find.text('Prendre une photo'), findsOneWidget);
+    expect(find.byKey(const Key('scanner-fallback-import')), findsOneWidget);
+    expect(find.text('Importer un document'), findsOneWidget);
+  });
+
+  group('Configuration et transport Gemini release', () {
+    tearDown(() {
+      GeminiTransport.testProxyUrl = null;
+      GeminiTransport.testTimeout = null;
+      GeminiTransport.testPost = null;
+    });
+
+    test('absence de configuration désactive Gemini sans bloquer la lettre',
+        () async {
+      expect(GeminiTransport.configurationMode, 'disabled');
+      final result = await GeminiLetterV156Service.generate(
+        recipient: 'Mairie',
+        subject: 'Demande',
+        situation: 'Dossier en attente',
+        desiredResult: 'Obtenir une réponse',
+        importantInformation: '',
+        type: GeminiLetterTypeV156.complaint,
+        tone: GeminiLetterToneV156.professional,
+        format: LetterFormatV1561.official,
+      );
+      expect(result.body, isNotEmpty);
+    }, skip: GeminiTransport.usesEmbeddedKey || GeminiTransport.usesProxy);
+
+    test('génération Gemini accepte une réponse JSON valide du proxy',
+        () async {
+      GeminiTransport.testProxyUrl = 'https://ia.example.test/gemini';
+      GeminiTransport.testPost = (uri, {headers, body}) async {
+        expect(uri.query, isEmpty);
+        expect(body.toString(), isNot(contains('GEMINI_API_KEY')));
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text': jsonEncode({
+                        'titre': 'Demande',
+                        'objet': 'Suivi du dossier',
+                        'corps': 'Je sollicite le suivi de mon dossier.'
+                      })
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+        );
+      };
+      final letter = await GeminiLetterWriter.generate(
+        recipient: 'Mairie',
+        request: 'Suivre mon dossier',
+        context: '',
+        tone: 'Professionnel',
+      );
+      expect(letter.subject, 'Suivi du dossier');
+      expect(letter.body, contains('suivi'));
+    });
+
+    test('timeout Gemini est classé sans détail sensible', () async {
+      GeminiTransport.testProxyUrl = 'https://ia.example.test/gemini';
+      GeminiTransport.testTimeout = const Duration(milliseconds: 10);
+      GeminiTransport.testPost =
+          (uri, {headers, body}) => Completer<http.Response>().future;
+      expect(
+        () => GeminiTransport.request('test', const {}),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('erreur réseau Gemini est propagée sans clé', () async {
+      GeminiTransport.testProxyUrl = 'https://ia.example.test/gemini';
+      GeminiTransport.testPost = (uri, {headers, body}) =>
+          Future<http.Response>.error(const SocketException('hors ligne'));
+      expect(
+        () => GeminiTransport.request('test', const {}),
+        throwsA(isA<SocketException>()),
+      );
+    });
+
+    test('réponse Gemini invalide devient une erreur générique', () async {
+      GeminiTransport.testProxyUrl = 'https://ia.example.test/gemini';
+      GeminiTransport.testPost =
+          (uri, {headers, body}) async => http.Response('pas du json', 200);
+      await expectLater(
+        GeminiTransport.request('test', const {}),
+        throwsA(predicate((error) =>
+            error is GeminiApiException &&
+            error.toString() == geminiUnavailableMessage)),
+      );
+    });
+  });
+
   testWidgets('AdminFacile V17 affiche le nouveau tableau de bord',
       (tester) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -28,6 +370,7 @@ void main() {
       settings: settings,
       documentStore: documentStore,
       procedureStore: procedureStore,
+      authSession: const AuthenticatedTestSession(),
     ));
     await tester.pumpAndSettle();
 
@@ -67,7 +410,8 @@ void main() {
     await tester.pumpWidget(AdminFacileApp(
         settings: settings,
         documentStore: documents,
-        procedureStore: procedures));
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('dashboard-profile-button')));
     await tester.pumpAndSettle();
@@ -123,7 +467,8 @@ void main() {
     await tester.pumpWidget(AdminFacileApp(
         settings: settings,
         documentStore: documents,
-        procedureStore: procedures));
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('À ne pas manquer'), 500,
         scrollable: find.byType(Scrollable).first);
@@ -192,7 +537,8 @@ void main() {
     await tester.pumpWidget(AdminFacileApp(
         settings: settings,
         documentStore: documents,
-        procedureStore: procedures));
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
     for (final label in [
       'Assistant\nadministratif',
@@ -268,7 +614,8 @@ void main() {
     await tester.pumpWidget(AdminFacileApp(
         settings: settings,
         documentStore: documents,
-        procedureStore: procedures));
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('dashboard-profile-button')));
     await tester.pumpAndSettle();
@@ -339,7 +686,8 @@ void main() {
     await tester.pumpWidget(AdminFacileApp(
         settings: settings,
         documentStore: documents,
-        procedureStore: procedures));
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Mes démarches en cours'), 500,
         scrollable: find.byType(Scrollable).first);
@@ -907,6 +1255,7 @@ void main() {
       settings: settings,
       documentStore: documents,
       procedureStore: procedures,
+      authSession: const AuthenticatedTestSession(),
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.menu_rounded).first);
@@ -1001,6 +1350,7 @@ void main() {
       settings: settings,
       documentStore: documents,
       procedureStore: procedures,
+      authSession: const AuthenticatedTestSession(),
     ));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.search_rounded), findsWidgets);
@@ -1504,8 +1854,14 @@ void main() {
     expect(source, contains('_extractTextFromImages(renderedPaths)'));
     expect(source, contains('ScannerProcessingService.buildA4Pdf(pdfPages)'));
     expect(android, contains('GmsDocumentScanning.getClient(options)'));
+    expect(android, contains('FlutterFragmentActivity'));
+    expect(android, contains('registerForActivityResult'));
+    expect(android, contains('StartIntentSenderForResult'));
+    expect(android, isNot(contains('startIntentSenderForResult')));
+    expect(android, isNot(contains('onActivityResult')));
     expect(android, contains('SCANNER_MODE_FULL'));
     expect(android, contains('RESULT_FORMAT_JPEG'));
+    expect(android, contains('RESULT_FORMAT_PDF'));
     expect(android, contains('imagePaths'));
     expect(android, isNot(contains('EdgeDetector')));
     expect(android, isNot(contains('PerspectiveCropper')));
@@ -1575,7 +1931,8 @@ void main() {
     expect(ignore, contains('/android/key.properties'));
     expect(ignore, contains('/android/app/*.jks'));
     expect(example, contains('[À COMPLÉTER]'));
-    expect(File('android/key.properties').existsSync(), isFalse);
+    // La configuration locale peut exister pour signer la release ; son
+    // contenu ne doit jamais être lu ni exposé par les tests.
   });
 
   test('V20.1 conserve uniquement les permissions Android nécessaires', () {

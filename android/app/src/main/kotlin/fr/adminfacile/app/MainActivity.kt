@@ -2,126 +2,210 @@ package fr.adminfacile.app
 
 import android.app.Activity
 import android.content.Intent
-import android.content.IntentSender
+import android.util.Log
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
+    companion object {
+        private const val TAG = "AdminFacileScanner"
+        private const val CHANNEL = "adminfacile/mlkit_document_scanner"
+    }
+
     private var scannerResult: MethodChannel.Result? = null
-    private val scannerRequestCode = 1900
+    private var scanDiagnosticId: String? = null
+
+    // Enregistrement inconditionnel recommandé par l'Activity Result API. Le
+    // callback reste correctement rattaché lors d'une recréation d'Activity.
+    private val scannerLauncher = registerForActivityResult(
+        StartIntentSenderForResult()
+    ) { activityResult ->
+        handleScannerResult(activityResult.resultCode, activityResult.data)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "adminfacile/mlkit_document_scanner"
-        ).setMethodCallHandler { call, result ->
-            if (call.method != "scan") {
-                result.notImplemented()
-                return@setMethodCallHandler
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "scan") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                if (scannerResult != null) {
+                    result.error("SCAN_IN_PROGRESS", "Un scan est déjà en cours.", null)
+                    return@setMethodCallHandler
+                }
+                val pageLimit = (call.argument<Int>("pageLimit") ?: 10).coerceIn(1, 10)
+                scanDiagnosticId = UUID.randomUUID().toString().take(8)
+                scannerResult = result
+                logInfo("request", "pages=$pageLimit")
+                launchMlKitScanner(pageLimit)
             }
-            if (scannerResult != null) {
-                result.error("SCAN_IN_PROGRESS", "Un scan est déjà en cours.", null)
-                return@setMethodCallHandler
-            }
-            val pageLimit = (call.argument<Int>("pageLimit") ?: 10).coerceIn(1, 10)
-            scannerResult = result
-            launchMlKitScanner(pageLimit)
-        }
     }
 
     private fun launchMlKitScanner(pageLimit: Int) {
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(false)
             .setPageLimit(pageLimit)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setResultFormats(
+                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
+                GmsDocumentScannerOptions.RESULT_FORMAT_PDF
+            )
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .build()
 
         GmsDocumentScanning.getClient(options)
             .getStartScanIntent(this)
-            .addOnSuccessListener { intentSender: IntentSender ->
+            .addOnSuccessListener { intentSender ->
                 try {
-                    startIntentSenderForResult(
-                        intentSender,
-                        scannerRequestCode,
-                        null,
-                        0,
-                        0,
-                        0,
-                        null
-                    )
+                    logInfo("launcher_ready")
+                    scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
                 } catch (error: Exception) {
-                    finishScannerWithError("MLKIT_LAUNCH_FAILED", error)
+                    finishScannerWithError("MLKIT_LAUNCH_FAILED", "launch", error)
                 }
             }
             .addOnFailureListener { error ->
-                finishScannerWithError("MLKIT_UNAVAILABLE", error)
+                finishScannerWithError("MLKIT_UNAVAILABLE", "play_services", error)
             }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != scannerRequestCode) return
-        val pending = scannerResult ?: return
+    private fun handleScannerResult(resultCode: Int, data: Intent?) {
+        val pending = scannerResult
+        if (pending == null) {
+            Log.w(TAG, "event=orphan_result resultCode=$resultCode")
+            return
+        }
         scannerResult = null
 
         if (resultCode == Activity.RESULT_CANCELED) {
+            logInfo("cancelled")
+            scanDiagnosticId = null
             pending.success(null)
             return
         }
-        if (resultCode != Activity.RESULT_OK) {
-            pending.error("MLKIT_SCAN_FAILED", "Résultat scanner invalide.", null)
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            finishPendingWithError(
+                pending,
+                "MLKIT_SCAN_FAILED",
+                "result",
+                "resultCode=$resultCode data=${data != null}"
+            )
             return
         }
 
         try {
-            val pages = GmsDocumentScanningResult
-                .fromActivityResultIntent(data)
-                ?.pages
-                .orEmpty()
+            val scan = GmsDocumentScanningResult.fromActivityResultIntent(data)
+            val pages = scan?.pages.orEmpty()
             if (pages.isEmpty()) {
-                pending.error("MLKIT_EMPTY_RESULT", "Aucune page retournée.", null)
+                finishPendingWithError(pending, "MLKIT_EMPTY_RESULT", "decode", "pages=0")
                 return
             }
 
+            val outputDirectory = File(cacheDir, "document_scans").apply { mkdirs() }
             val stamp = System.currentTimeMillis()
             val paths = ArrayList<String>(pages.size)
-            var partialResult = false
+            var failedPages = 0
             pages.forEachIndexed { index, page ->
                 try {
-                    val destination = File(cacheDir, "mlkit_scan_${stamp}_$index.jpg")
+                    val destination = File(outputDirectory, "scan_${stamp}_$index.jpg")
                     contentResolver.openInputStream(page.imageUri).use { input ->
                         requireNotNull(input) { "Image ML Kit illisible." }
                         FileOutputStream(destination).use { output -> input.copyTo(output) }
                     }
-                    paths.add(destination.path)
-                } catch (_: Exception) {
-                    partialResult = true
+                    if (destination.length() <= 0L) error("Image ML Kit vide.")
+                    paths.add(destination.absolutePath)
+                } catch (error: Exception) {
+                    failedPages += 1
+                    Log.w(
+                        TAG,
+                        "id=$scanDiagnosticId event=page_copy_failed index=$index type=${error.javaClass.simpleName}"
+                    )
                 }
             }
             if (paths.isEmpty()) {
-                pending.error("MLKIT_COPY_FAILED", "Aucune page lisible.", null)
+                finishPendingWithError(
+                    pending,
+                    "MLKIT_COPY_FAILED",
+                    "copy_pages",
+                    "failed=$failedPages"
+                )
                 return
             }
-            pending.success(mapOf(
-                "imagePaths" to paths,
-                "pageCount" to paths.size,
-                "partialResult" to partialResult
-            ))
+
+            var pdfPath: String? = null
+            scan?.pdf?.uri?.let { uri ->
+                try {
+                    val destination = File(outputDirectory, "scan_$stamp.pdf")
+                    contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "PDF ML Kit illisible." }
+                        FileOutputStream(destination).use { output -> input.copyTo(output) }
+                    }
+                    if (destination.length() > 0L) pdfPath = destination.absolutePath
+                } catch (error: Exception) {
+                    Log.w(
+                        TAG,
+                        "id=$scanDiagnosticId event=pdf_copy_failed type=${error.javaClass.simpleName}"
+                    )
+                }
+            }
+
+            logInfo(
+                "success",
+                "pages=${paths.size} failedPages=$failedPages nativePdf=${pdfPath != null}"
+            )
+            scanDiagnosticId = null
+            pending.success(
+                mapOf(
+                    "imagePaths" to paths,
+                    "pageCount" to paths.size,
+                    "partialResult" to (failedPages > 0),
+                    "pdfPath" to pdfPath
+                )
+            )
         } catch (error: Exception) {
-            pending.error("MLKIT_COPY_FAILED", error.message, error.toString())
+            finishPendingWithError(
+                pending,
+                "MLKIT_RESULT_FAILED",
+                "decode",
+                error.javaClass.simpleName
+            )
         }
     }
 
-    private fun finishScannerWithError(code: String, error: Exception) {
-        scannerResult?.error(code, error.message, error.toString())
+    private fun finishScannerWithError(code: String, stage: String, error: Exception) {
+        val pending = scannerResult ?: return
         scannerResult = null
+        finishPendingWithError(pending, code, stage, error.javaClass.simpleName)
+    }
+
+    private fun finishPendingWithError(
+        pending: MethodChannel.Result,
+        code: String,
+        stage: String,
+        diagnostic: String
+    ) {
+        Log.e(
+            TAG,
+            "id=$scanDiagnosticId event=failed code=$code stage=$stage diagnostic=$diagnostic"
+        )
+        pending.error(
+            code,
+            "Le scanner de documents est indisponible.",
+            mapOf("diagnosticId" to scanDiagnosticId, "stage" to stage)
+        )
+        scanDiagnosticId = null
+    }
+
+    private fun logInfo(event: String, details: String = "") {
+        Log.i(TAG, "id=$scanDiagnosticId event=$event $details".trim())
     }
 }

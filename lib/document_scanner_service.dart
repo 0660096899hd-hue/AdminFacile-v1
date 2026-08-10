@@ -16,8 +16,9 @@ abstract interface class DocumentScannerService {
 }
 
 class DocumentScannerUnavailableException implements Exception {
-  const DocumentScannerUnavailableException([this.cause]);
+  const DocumentScannerUnavailableException([this.cause, this.code]);
   final Object? cause;
+  final String? code;
 
   static const message =
       'Le scanner professionnel est momentanément indisponible. '
@@ -55,7 +56,7 @@ class AndroidMlKitDocumentScannerService implements DocumentScannerService {
         partialResult: response['partialResult'] == true,
       );
     } on PlatformException catch (error) {
-      throw DocumentScannerUnavailableException(error);
+      throw DocumentScannerUnavailableException(error, error.code);
     } on MissingPluginException catch (error) {
       throw DocumentScannerUnavailableException(error);
     } on FormatException catch (error) {

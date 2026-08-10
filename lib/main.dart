@@ -465,6 +465,7 @@ Future<void> main() async {
       settings: settings,
       documentStore: documentStore,
       procedureStore: procedureStore,
+      authSession: SupabaseAppAuthSession(),
     ),
   );
 
@@ -709,10 +710,12 @@ class AdminFacileApp extends StatelessWidget {
     required this.settings,
     required this.documentStore,
     required this.procedureStore,
+    required this.authSession,
   });
   final AppSettings settings;
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
+  final AppAuthSession authSession;
 
   @override
   Widget build(BuildContext context) {
@@ -724,50 +727,97 @@ class AdminFacileApp extends StatelessWidget {
         themeMode: settings.themePreference.themeMode,
         theme: _buildAdminTheme(Brightness.light, settings.comfortMode),
         darkTheme: _buildAdminTheme(Brightness.dark, settings.comfortMode),
-        home: _StartupSplash(
+        home: AuthGate(
           settings: settings,
           documentStore: documentStore,
           procedureStore: procedureStore,
+          authSession: authSession,
         ),
       ),
     );
   }
 }
 
-class _StartupSplash extends StatefulWidget {
-  const _StartupSplash({
+abstract interface class AppAuthSession {
+  bool get isServiceAvailable;
+  bool get isAuthenticated;
+  ProfessionalAuthService? get service;
+  Stream<bool> get changes;
+}
+
+class SupabaseAppAuthSession implements AppAuthSession {
+  @override
+  bool get isServiceAvailable => _supabaseReady && _authService != null;
+
+  @override
+  bool get isAuthenticated =>
+      isServiceAvailable &&
+      Supabase.instance.client.auth.currentSession != null &&
+      Supabase.instance.client.auth.currentUser != null;
+
+  @override
+  ProfessionalAuthService? get service => _authService;
+
+  @override
+  Stream<bool> get changes {
+    if (!_supabaseReady) return const Stream<bool>.empty();
+    return Supabase.instance.client.auth.onAuthStateChange.map(
+      (state) => state.session != null && state.session?.user != null,
+    );
+  }
+}
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({
+    super.key,
     required this.settings,
     required this.documentStore,
     required this.procedureStore,
+    required this.authSession,
   });
   final AppSettings settings;
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
+  final AppAuthSession authSession;
 
   @override
-  State<_StartupSplash> createState() => _StartupSplashState();
+  State<AuthGate> createState() => _AuthGateState();
 }
 
-class _StartupSplashState extends State<_StartupSplash> {
+class _AuthGateState extends State<AuthGate> {
+  StreamSubscription<bool>? _subscription;
+  bool _splashComplete = false;
+  late bool _authenticated;
+
   @override
   void initState() {
     super.initState();
+    _authenticated = widget.authSession.isAuthenticated;
+    _subscription = widget.authSession.changes.listen(
+      (authenticated) {
+        if (mounted) setState(() => _authenticated = authenticated);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('AUTH_GATE stream_error type=${error.runtimeType}');
+        if (mounted) setState(() => _authenticated = false);
+      },
+    );
     Future<void>.delayed(const Duration(milliseconds: 1200), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => AppShell(
-            settings: widget.settings,
-            documentStore: widget.documentStore,
-            procedureStore: widget.procedureStore,
-          ),
-        ),
-      );
+      setState(() {
+        _splashComplete = true;
+        _authenticated = widget.authSession.isAuthenticated;
+      });
     });
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  Widget _splash() => Scaffold(
         body: SafeArea(
           child: Center(
             child: Padding(
@@ -780,6 +830,215 @@ class _StartupSplashState extends State<_StartupSplash> {
                   const SizedBox(height: 28),
                   const CircularProgressIndicator(),
                 ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_splashComplete) return _splash();
+    if (!_authenticated) {
+      return WelcomeAuthScreen(authSession: widget.authSession);
+    }
+    return AppShell(
+      settings: widget.settings,
+      documentStore: widget.documentStore,
+      procedureStore: widget.procedureStore,
+    );
+  }
+}
+
+class WelcomeAuthScreen extends StatefulWidget {
+  const WelcomeAuthScreen({super.key, required this.authSession});
+  final AppAuthSession authSession;
+
+  @override
+  State<WelcomeAuthScreen> createState() => _WelcomeAuthScreenState();
+}
+
+class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
+  final email = TextEditingController();
+  final password = TextEditingController();
+  bool? createAccount;
+  bool busy = false;
+  String? message;
+
+  @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final service = widget.authSession.service;
+    if (service == null) {
+      setState(() => message = 'Service temporairement indisponible.');
+      return;
+    }
+    setState(() {
+      busy = true;
+      message = null;
+    });
+    try {
+      if (createAccount == true) {
+        final result = await service.signUp(
+          email: email.text,
+          password: password.text,
+        );
+        if (mounted && result.emailConfirmationRequired) {
+          setState(() {
+            message = 'Compte créé. Vérifiez votre e-mail pour le confirmer.';
+            createAccount = false;
+            password.clear();
+          });
+        }
+      } else {
+        await service.signIn(email: email.text, password: password.text);
+      }
+    } on AuthOperationException catch (error) {
+      if (mounted) setState(() => message = error.displayMessage);
+    } catch (error) {
+      if (mounted) {
+        setState(() => message = ProfessionalAuthService.mapError(
+              error,
+              operation: createAccount == true ? 'signUp' : 'signIn',
+            ).displayMessage);
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final service = widget.authSession.service;
+    if (service == null) {
+      setState(() => message = 'Service temporairement indisponible.');
+      return;
+    }
+    setState(() {
+      busy = true;
+      message = null;
+    });
+    try {
+      await service.sendPasswordReset(email.text);
+      if (mounted) {
+        setState(() => message =
+            'E-mail de récupération envoyé. Vérifiez aussi vos courriers indésirables.');
+      }
+    } on AuthOperationException catch (error) {
+      if (mounted) setState(() => message = error.displayMessage);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: const Key('auth-welcome-screen'),
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Center(child: AdminFacileMark(size: 82)),
+                    const SizedBox(height: 18),
+                    Text('AdminFacile',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineMedium
+                            ?.copyWith(fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 8),
+                    const Text('Simplifiez vos démarches administratives',
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 30),
+                    if (createAccount == null) ...[
+                      FilledButton(
+                        key: const Key('auth-create-account'),
+                        onPressed: widget.authSession.isServiceAvailable
+                            ? () => setState(() => createAccount = true)
+                            : null,
+                        child: const Text('Créer mon compte'),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton(
+                        key: const Key('auth-existing-account'),
+                        onPressed: widget.authSession.isServiceAvailable
+                            ? () => setState(() => createAccount = false)
+                            : null,
+                        child: const Text('J’ai déjà un compte'),
+                      ),
+                      if (!widget.authSession.isServiceAvailable) ...[
+                        const SizedBox(height: 16),
+                        const Text('Service temporairement indisponible.',
+                            textAlign: TextAlign.center),
+                      ],
+                    ] else ...[
+                      Text(createAccount! ? 'Créer mon compte' : 'Connexion',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 16),
+                      TextField(
+                        key: const Key('auth-email'),
+                        controller: email,
+                        keyboardType: TextInputType.emailAddress,
+                        autofillHints: const [AutofillHints.email],
+                        decoration:
+                            const InputDecoration(labelText: 'Adresse e-mail'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('auth-password'),
+                        controller: password,
+                        obscureText: true,
+                        autofillHints: createAccount!
+                            ? const [AutofillHints.newPassword]
+                            : const [AutofillHints.password],
+                        decoration:
+                            const InputDecoration(labelText: 'Mot de passe'),
+                        onSubmitted: (_) => busy ? null : _submit(),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        key: const Key('auth-submit'),
+                        onPressed: busy ? null : _submit,
+                        child: busy
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : Text(createAccount!
+                                ? 'Créer mon compte'
+                                : 'Se connecter'),
+                      ),
+                      if (!createAccount!)
+                        TextButton(
+                          key: const Key('auth-forgot-password'),
+                          onPressed: busy ? null : _resetPassword,
+                          child: const Text('Mot de passe oublié ?'),
+                        ),
+                      TextButton(
+                        key: const Key('auth-back'),
+                        onPressed: busy
+                            ? null
+                            : () => setState(() => createAccount = null),
+                        child: const Text('Retour'),
+                      ),
+                    ],
+                    if (message != null) ...[
+                      const SizedBox(height: 12),
+                      Text(message!,
+                          key: const Key('auth-message'),
+                          textAlign: TextAlign.center),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -3228,10 +3487,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ? 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's récupérées' : ' récupérée'}'
                 : 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's' : ''}')),
       );
-    } on DocumentScannerUnavailableException catch (error, stackTrace) {
+    } on DocumentScannerUnavailableException catch (error) {
       if (!mounted) return;
       setState(() => scanError = DocumentScannerUnavailableException.message);
-      debugPrint('ML Kit Document Scanner indisponible : $error\n$stackTrace');
+      debugPrint(
+          'SCANNER_FLUTTER event=native_failure code=${error.code ?? 'unknown'} type=${error.cause.runtimeType}');
     } catch (error, stackTrace) {
       if (!mounted) return;
       setState(() => scanError = DocumentScannerUnavailableException.message);
@@ -3838,6 +4098,25 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 onPressed: scanA4,
                 icon: const Icon(Icons.refresh),
                 label: const Text('Réessayer'),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    key: const Key('scanner-fallback-camera'),
+                    onPressed: () => pickAndRead(ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Prendre une photo'),
+                  ),
+                  OutlinedButton.icon(
+                    key: const Key('scanner-fallback-import'),
+                    onPressed: importFile,
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: const Text('Importer un document'),
+                  ),
+                ],
               ),
             ]),
           ),
@@ -4783,26 +5062,126 @@ class DocumentInsight {
   }
 }
 
-class GeminiDocumentAnalyzer {
+const String geminiUnavailableMessage =
+    'Assistant IA momentanément indisponible.';
+
+/// Transport IA commun.
+///
+/// En production, [GEMINI_PROXY_URL] doit désigner un backend HTTPS qui garde
+/// la clé Google côté serveur. [GEMINI_API_KEY] reste accepté uniquement pour
+/// les builds de bêta interne : une dart-define est compilée dans le binaire et
+/// ne constitue donc pas un secret.
+class GeminiTransport {
   static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static const String _proxyUrl = String.fromEnvironment('GEMINI_PROXY_URL');
   static const String _model = String.fromEnvironment(
     'GEMINI_MODEL',
     defaultValue: 'gemini-3.5-flash-lite',
   );
+  static const int _timeoutSeconds = int.fromEnvironment(
+    'GEMINI_TIMEOUT_SECONDS',
+    defaultValue: 40,
+  );
 
-  static bool get isConfigured => _apiKey.trim().isNotEmpty;
+  @visibleForTesting
+  static String? testProxyUrl;
+  @visibleForTesting
+  static Duration? testTimeout;
+  @visibleForTesting
+  static Future<http.Response> Function(
+    Uri uri, {
+    Map<String, String>? headers,
+    Object? body,
+  })? testPost;
+
+  static String get _effectiveProxyUrl => testProxyUrl ?? _proxyUrl;
+  static bool get usesProxy => _effectiveProxyUrl.trim().isNotEmpty;
+  static bool get usesEmbeddedKey => !usesProxy && _apiKey.trim().isNotEmpty;
+  static bool get isConfigured => usesProxy || usesEmbeddedKey;
+  static String get configurationMode => usesProxy
+      ? 'proxy'
+      : usesEmbeddedKey
+          ? 'direct-beta'
+          : 'disabled';
+
+  static Future<Map<String, dynamic>> request(
+    String prompt,
+    Map<String, Object> generationConfig,
+  ) async {
+    if (!isConfigured) throw const GeminiConfigurationException();
+
+    final Uri uri;
+    final Map<String, String> headers = {'Content-Type': 'application/json'};
+    final Map<String, Object> body;
+    if (usesProxy) {
+      uri = Uri.parse(_effectiveProxyUrl.trim());
+      if (uri.scheme != 'https' &&
+          !(kDebugMode &&
+              (uri.host == 'localhost' || uri.host == '127.0.0.1'))) {
+        throw const GeminiConfigurationException();
+      }
+      final token = _supabaseReady
+          ? Supabase.instance.client.auth.currentSession?.accessToken
+          : null;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+      body = {
+        'model': _model,
+        'prompt': prompt,
+        'generationConfig': generationConfig,
+      };
+    } else {
+      uri = Uri.https(
+        'generativelanguage.googleapis.com',
+        '/v1beta/models/$_model:generateContent',
+        {'key': _apiKey},
+      );
+      body = {
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        'generationConfig': generationConfig,
+      };
+    }
+
+    try {
+      final post = testPost ?? http.post;
+      final response = await post(uri, headers: headers, body: jsonEncode(body))
+          .timeout(
+              testTimeout ?? Duration(seconds: _timeoutSeconds.clamp(5, 120)));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw const GeminiApiException();
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) throw const GeminiApiException();
+      return Map<String, dynamic>.from(decoded);
+    } on TimeoutException {
+      rethrow;
+    } on SocketException {
+      rethrow;
+    } on GeminiApiException {
+      rethrow;
+    } on FormatException {
+      throw const GeminiApiException();
+    } catch (_) {
+      throw const GeminiApiException();
+    }
+  }
+}
+
+class GeminiDocumentAnalyzer {
+  static bool get isConfigured => GeminiTransport.isConfigured;
 
   static Future<DocumentInsight> analyze(String sourceText) async {
     if (!isConfigured) {
-      throw const GeminiConfigurationException(
-        'Clé Gemini absente. Relancez avec --dart-define=GEMINI_API_KEY=...',
-      );
+      throw const GeminiConfigurationException();
     }
-
-    final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/'
-      '$_model:generateContent?key=$_apiKey',
-    );
 
     final prompt = '''
 Tu es un assistant administratif prudent. Analyse uniquement le document fourni.
@@ -4829,40 +5208,11 @@ COURRIER :
 ${sourceText.trim()}
 ''';
 
-    final response = await http
-        .post(
-          uri,
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'role': 'user',
-                'parts': [
-                  {'text': prompt}
-                ]
-              }
-            ],
-            'generationConfig': {
-              'temperature': 0.1,
-              'responseMimeType': 'application/json',
-              'maxOutputTokens': 2048,
-            },
-          }),
-        )
-        .timeout(const Duration(seconds: 35));
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      String detail = response.body;
-      try {
-        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-        detail = ((decoded['error'] as Map?)?['message'] ?? detail).toString();
-      } catch (_) {}
-      throw GeminiApiException(
-        'Gemini a renvoyé ${response.statusCode}: $detail',
-      );
-    }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = await GeminiTransport.request(prompt, const {
+      'temperature': 0.1,
+      'responseMimeType': 'application/json',
+      'maxOutputTokens': 2048,
+    });
     final candidates = decoded['candidates'] as List?;
     if (candidates == null || candidates.isEmpty) {
       throw const GeminiApiException('Gemini n’a renvoyé aucune analyse.');
@@ -4932,14 +5282,8 @@ class GeminiDocumentChat {
   static Future<String> ask(
       {required String sourceText, required String question}) async {
     if (!GeminiDocumentAnalyzer.isConfigured) {
-      throw const GeminiConfigurationException(
-        'Clé Gemini absente. Relancez avec --dart-define=GEMINI_API_KEY=...',
-      );
+      throw const GeminiConfigurationException();
     }
-    final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/'
-      '${GeminiDocumentAnalyzer._model}:generateContent?key=${GeminiDocumentAnalyzer._apiKey}',
-    );
     final prompt = '''
 Tu aides une personne à comprendre un document administratif.
 Réponds en français simple, en 5 phrases maximum.
@@ -4952,27 +5296,10 @@ ${sourceText.trim()}
 QUESTION :
 ${question.trim()}
 ''';
-    final response = await http
-        .post(
-          uri,
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'role': 'user',
-                'parts': [
-                  {'text': prompt}
-                ]
-              }
-            ],
-            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 700},
-          }),
-        )
-        .timeout(const Duration(seconds: 35));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw GeminiApiException('Gemini a renvoyé ${response.statusCode}.');
-    }
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = await GeminiTransport.request(
+      prompt,
+      const {'temperature': 0.2, 'maxOutputTokens': 700},
+    );
     final candidates = decoded['candidates'];
     Map<String, dynamic>? content;
     if (candidates is List && candidates.isNotEmpty) {
@@ -5038,7 +5365,7 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
       if (mounted) {
         setState(() => messages.add({
               'role': 'assistant',
-              'text': 'Réponse impossible : $error',
+              'text': geminiUnavailableMessage,
             }));
       }
     } finally {
@@ -5151,49 +5478,17 @@ class GeminiGeneratedLetter {
 }
 
 class GeminiLetterWriter {
-  static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
-  static const String _model = String.fromEnvironment(
-    'GEMINI_MODEL',
-    defaultValue: 'gemini-3.5-flash-lite',
-  );
-
-  static bool get isConfigured => _apiKey.trim().isNotEmpty;
+  static bool get isConfigured => GeminiTransport.isConfigured;
 
   static Future<Map<String, dynamic>> _requestJson(String prompt) async {
     if (!isConfigured) {
-      throw const GeminiConfigurationException(
-        'Clé Gemini absente. Relancez avec --dart-define=GEMINI_API_KEY=...',
-      );
+      throw const GeminiConfigurationException();
     }
-    final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/'
-      '$_model:generateContent?key=$_apiKey',
-    );
-    final response = await http
-        .post(
-          uri,
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'role': 'user',
-                'parts': [
-                  {'text': prompt}
-                ]
-              }
-            ],
-            'generationConfig': {
-              'temperature': 0.2,
-              'responseMimeType': 'application/json',
-              'maxOutputTokens': 2500,
-            },
-          }),
-        )
-        .timeout(const Duration(seconds: 40));
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw GeminiApiException('Gemini a renvoyé ${response.statusCode}.');
-    }
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = await GeminiTransport.request(prompt, const {
+      'temperature': 0.2,
+      'responseMimeType': 'application/json',
+      'maxOutputTokens': 2500,
+    });
     final candidates = decoded['candidates'] as List?;
     final parts =
         ((candidates?.first as Map?)?['content'] as Map?)?['parts'] as List?;
@@ -5325,10 +5620,8 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
           initialRecipient: recipient.text.trim(),
         ),
       ));
-    } on GeminiConfigurationException catch (e) {
-      if (mounted) setState(() => error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => error = 'Génération impossible : $e');
+    } catch (_) {
+      if (mounted) setState(() => error = geminiUnavailableMessage);
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -5890,7 +6183,7 @@ class _GeminiLetterWriterV156ScreenState
           settings: widget.settings,
         ));
         status = 'Erreur de connexion';
-        error = 'Gemini est indisponible. Une lettre locale a été préparée.';
+        error = '$geminiUnavailableMessage Une lettre locale a été préparée.';
       });
     } finally {
       if (mounted) setState(() => loading = false);
@@ -5918,8 +6211,8 @@ class _GeminiLetterWriterV156ScreenState
       if (mounted) {
         setState(() {
           status = 'Erreur de connexion';
-          error =
-              'Action indisponible. La lettre reste modifiable manuellement.';
+          error = '$geminiUnavailableMessage '
+              'La lettre reste modifiable manuellement.';
         });
       }
     } finally {
@@ -6192,14 +6485,14 @@ class _GeminiLetterWriterV156ScreenState
 }
 
 class GeminiConfigurationException implements Exception {
-  const GeminiConfigurationException(this.message);
+  const GeminiConfigurationException([this.message = geminiUnavailableMessage]);
   final String message;
   @override
   String toString() => message;
 }
 
 class GeminiApiException implements Exception {
-  const GeminiApiException(this.message);
+  const GeminiApiException([this.message = geminiUnavailableMessage]);
   final String message;
   @override
   String toString() => message;
@@ -6824,16 +7117,15 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
         showSimpleExplanation = true;
         completedActions.clear();
       });
-    } on GeminiConfigurationException catch (error) {
+    } on GeminiConfigurationException {
       if (!mounted) return;
-      setState(() => aiError = error.message);
+      setState(() => aiError = geminiUnavailableMessage);
     } on TimeoutException {
       if (!mounted) return;
-      setState(() => aiError =
-          'Gemini met trop de temps à répondre. Vérifiez Internet puis réessayez.');
-    } catch (error) {
+      setState(() => aiError = geminiUnavailableMessage);
+    } catch (_) {
       if (!mounted) return;
-      setState(() => aiError = 'Analyse Gemini impossible : $error');
+      setState(() => aiError = geminiUnavailableMessage);
     } finally {
       if (mounted) setState(() => aiLoading = false);
     }
@@ -7096,8 +7388,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                               if (!GeminiDocumentAnalyzer.isConfigured) ...[
                                 const SizedBox(height: 8),
                                 const Text(
-                                  'Clé Gemini non détectée. Lancez l’application avec '
-                                  '--dart-define=GEMINI_API_KEY=VOTRE_CLE.',
+                                  geminiUnavailableMessage,
                                   style: TextStyle(fontSize: 12),
                                 ),
                               ],
@@ -10331,15 +10622,15 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content:
               Text('Lettre améliorée avec Gemini. Relisez-la avant l’envoi.')));
-    } on GeminiConfigurationException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } catch (e) {
+    } on GeminiConfigurationException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Amélioration impossible : $e')));
+            const SnackBar(content: Text(geminiUnavailableMessage)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(geminiUnavailableMessage)));
       }
     } finally {
       if (mounted) setState(() => improving = false);
