@@ -224,6 +224,54 @@ void main() {
           find.textContaining('E-mail de récupération envoyé'), findsOneWidget);
     });
 
+    testWidgets(
+        'connexion masque, affiche puis remasque sans perdre le contenu',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-existing-account')));
+      await tester.pump();
+
+      final passwordFinder = find.byKey(const Key('auth-password'));
+      final visibilityFinder =
+          find.byKey(const Key('auth-password-visibility'));
+      expect(tester.widget<TextField>(passwordFinder).obscureText, isTrue);
+      expect(find.byTooltip('Afficher le mot de passe'), findsOneWidget);
+
+      await tester.enterText(passwordFinder, 'secret12');
+      await tester.tap(visibilityFinder);
+      await tester.pump();
+      expect(tester.widget<TextField>(passwordFinder).obscureText, isFalse);
+      expect(find.byTooltip('Masquer le mot de passe'), findsOneWidget);
+      expect(tester.widget<TextField>(passwordFinder).controller!.text,
+          'secret12');
+
+      await tester.tap(visibilityFinder);
+      await tester.pump();
+      expect(tester.widget<TextField>(passwordFinder).obscureText, isTrue);
+      expect(tester.widget<TextField>(passwordFinder).controller!.text,
+          'secret12');
+    });
+
+    testWidgets('création de compte possède aussi le basculement sécurisé',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-create-account')));
+      await tester.pump();
+
+      final passwordFinder = find.byKey(const Key('auth-password'));
+      expect(tester.widget<TextField>(passwordFinder).obscureText, isTrue);
+      await tester.enterText(passwordFinder, 'nouveau-secret');
+      await tester.tap(find.byKey(const Key('auth-password-visibility')));
+      await tester.pump();
+      expect(tester.widget<TextField>(passwordFinder).obscureText, isFalse);
+      expect(tester.widget<TextField>(passwordFinder).controller!.text,
+          'nouveau-secret');
+    });
+
     testWidgets('erreur réseau ne donne jamais accès au dashboard',
         (tester) async {
       final session = MutableTestAuthSession();
@@ -416,6 +464,39 @@ void main() {
     await tester.tap(find.byKey(const Key('dashboard-profile-button')));
     await tester.pumpAndSettle();
     expect(find.text('Mon profil'), findsOneWidget);
+  });
+
+  testWidgets('Le profil masque et bascule son mot de passe sans perte',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final settings = AppSettings();
+    final documents = DocumentStore();
+    final procedures = ProcedureStore();
+    await settings.load();
+    await documents.load();
+    await procedures.load();
+    await tester.pumpWidget(AdminFacileApp(
+        settings: settings,
+        documentStore: documents,
+        procedureStore: procedures,
+        authSession: const AuthenticatedTestSession()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('dashboard-profile-button')));
+    await tester.pumpAndSettle();
+
+    final passwordFinder = find.byKey(const Key('profile-auth-password'));
+    final visibilityFinder =
+        find.byKey(const Key('profile-auth-password-visibility'));
+    expect(tester.widget<TextField>(passwordFinder).obscureText, isTrue);
+    await tester.enterText(passwordFinder, 'profil-secret');
+    await tester.tap(visibilityFinder);
+    await tester.pump();
+    expect(tester.widget<TextField>(passwordFinder).obscureText, isFalse);
+    expect(tester.widget<TextField>(passwordFinder).controller!.text,
+        'profil-secret');
+    await tester.tap(visibilityFinder);
+    await tester.pump();
+    expect(tester.widget<TextField>(passwordFinder).obscureText, isTrue);
   });
 
   test('Les compteurs V16 calculent les démarches et relances proches', () {

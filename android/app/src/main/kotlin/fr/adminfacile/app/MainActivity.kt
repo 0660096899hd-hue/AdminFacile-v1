@@ -53,24 +53,47 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun launchMlKitScanner(pageLimit: Int) {
-        val options = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(false)
-            .setPageLimit(pageLimit)
-            .setResultFormats(
-                GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
-                GmsDocumentScannerOptions.RESULT_FORMAT_PDF
-            )
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
-            .build()
+        val options = try {
+            logStep("options_create")
+            GmsDocumentScannerOptions.Builder()
+                .setGalleryImportAllowed(false)
+                .setPageLimit(pageLimit)
+                .setResultFormats(
+                    GmsDocumentScannerOptions.RESULT_FORMAT_JPEG,
+                    GmsDocumentScannerOptions.RESULT_FORMAT_PDF
+                )
+                .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                .build()
+                .also { logStep("options_ready") }
+        } catch (error: Throwable) {
+            finishScannerWithError("MLKIT_OPTIONS_FAILED", "options", error)
+            return
+        }
 
-        GmsDocumentScanning.getClient(options)
-            .getStartScanIntent(this)
+        val client = try {
+            logStep("client_create")
+            GmsDocumentScanning.getClient(options).also { logStep("client_ready") }
+        } catch (error: Throwable) {
+            finishScannerWithError("MLKIT_CLIENT_FAILED", "client", error)
+            return
+        }
+
+        val intentTask = try {
+            logStep("intent_sender_create")
+            client.getStartScanIntent(this)
+        } catch (error: Throwable) {
+            finishScannerWithError("MLKIT_INTENT_FAILED", "intent_sender", error)
+            return
+        }
+
+        intentTask
             .addOnSuccessListener { intentSender ->
                 try {
-                    logInfo("launcher_ready")
+                    logStep("intent_sender_ready")
                     scannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
-                } catch (error: Exception) {
-                    finishScannerWithError("MLKIT_LAUNCH_FAILED", "launch", error)
+                    logStep("activity_launched")
+                } catch (error: Throwable) {
+                    finishScannerWithError("MLKIT_LAUNCH_FAILED", "activity_launch", error)
                 }
             }
             .addOnFailureListener { error ->
@@ -79,6 +102,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun handleScannerResult(resultCode: Int, data: Intent?) {
+        logStep("activity_result", "resultCode=$resultCode data=${data != null}")
         val pending = scannerResult
         if (pending == null) {
             Log.w(TAG, "event=orphan_result resultCode=$resultCode")
@@ -181,7 +205,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    private fun finishScannerWithError(code: String, stage: String, error: Exception) {
+    private fun finishScannerWithError(code: String, stage: String, error: Throwable) {
         val pending = scannerResult ?: return
         scannerResult = null
         finishPendingWithError(pending, code, stage, error.javaClass.simpleName)
@@ -195,7 +219,7 @@ class MainActivity : FlutterFragmentActivity() {
     ) {
         Log.e(
             TAG,
-            "id=$scanDiagnosticId event=failed code=$code stage=$stage diagnostic=$diagnostic"
+            "SCANNER_NATIVE id=$scanDiagnosticId failure=$stage code=$code type=$diagnostic"
         )
         pending.error(
             code,
@@ -207,5 +231,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun logInfo(event: String, details: String = "") {
         Log.i(TAG, "id=$scanDiagnosticId event=$event $details".trim())
+    }
+
+    private fun logStep(step: String, details: String = "") {
+        Log.i(TAG, "SCANNER_NATIVE id=$scanDiagnosticId step=$step $details".trim())
     }
 }

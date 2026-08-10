@@ -52,6 +52,37 @@ void main() {
     );
   });
 
+  test('V20.3.1 conserve le code de l’erreur native gérée', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(
+        code: 'MLKIT_CLIENT_FAILED',
+        message: 'Le scanner de documents est indisponible.',
+      );
+    });
+
+    await expectLater(
+      service.scan(),
+      throwsA(isA<DocumentScannerUnavailableException>().having(
+        (error) => error.code,
+        'code natif',
+        'MLKIT_CLIENT_FAILED',
+      )),
+    );
+  });
+
+  test('V20.3.1 borne la configuration multipage envoyée au MethodChannel',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'scan');
+      expect(call.arguments, {'pageLimit': 10});
+      return null;
+    });
+
+    expect(await service.scan(pageLimit: 99), isNull);
+  });
+
   test('V19.0 refuse un résultat vide sans perdre le document courant',
       () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

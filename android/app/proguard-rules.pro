@@ -9,3 +9,10 @@
 -dontwarn com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 -dontwarn com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions$Builder
 -dontwarn com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+
+# Firebase ComponentDiscovery instancie les registrars ML Kit par réflexion via
+# leur constructeur public sans argument. La règle consumer ML Kit conserve le
+# nom des classes, mais R8 peut supprimer ces constructeurs en release.
+-keepclassmembers class * implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+}

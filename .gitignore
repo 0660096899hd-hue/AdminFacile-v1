@@ -57,3 +57,4 @@ android/.kotlin/
 .dart-tool/
 .flutter
 .flutter_tool_state
+scanner_log.txt

@@ -1,7 +1,7 @@
 name: admin_facile
 description: AdminFacile, assistant administratif personnel.
 publish_to: "none"
-version: 20.3.0+83
+version: 20.3.1+84
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

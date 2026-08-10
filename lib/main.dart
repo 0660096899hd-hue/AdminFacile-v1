@@ -863,6 +863,7 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
   final password = TextEditingController();
   bool? createAccount;
   bool busy = false;
+  bool passwordVisible = false;
   String? message;
 
   @override
@@ -963,7 +964,10 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                       FilledButton(
                         key: const Key('auth-create-account'),
                         onPressed: widget.authSession.isServiceAvailable
-                            ? () => setState(() => createAccount = true)
+                            ? () => setState(() {
+                                  createAccount = true;
+                                  passwordVisible = false;
+                                })
                             : null,
                         child: const Text('Créer mon compte'),
                       ),
@@ -971,7 +975,10 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                       OutlinedButton(
                         key: const Key('auth-existing-account'),
                         onPressed: widget.authSession.isServiceAvailable
-                            ? () => setState(() => createAccount = false)
+                            ? () => setState(() {
+                                  createAccount = false;
+                                  passwordVisible = false;
+                                })
                             : null,
                         child: const Text('J’ai déjà un compte'),
                       ),
@@ -996,12 +1003,24 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                       TextField(
                         key: const Key('auth-password'),
                         controller: password,
-                        obscureText: true,
+                        obscureText: !passwordVisible,
                         autofillHints: createAccount!
                             ? const [AutofillHints.newPassword]
                             : const [AutofillHints.password],
-                        decoration:
-                            const InputDecoration(labelText: 'Mot de passe'),
+                        decoration: InputDecoration(
+                          labelText: 'Mot de passe',
+                          suffixIcon: IconButton(
+                            key: const Key('auth-password-visibility'),
+                            tooltip: passwordVisible
+                                ? 'Masquer le mot de passe'
+                                : 'Afficher le mot de passe',
+                            icon: Icon(passwordVisible
+                                ? Icons.visibility_off
+                                : Icons.visibility),
+                            onPressed: () => setState(
+                                () => passwordVisible = !passwordVisible),
+                          ),
+                        ),
                         onSubmitted: (_) => busy ? null : _submit(),
                       ),
                       const SizedBox(height: 16),
@@ -1027,7 +1046,10 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                         key: const Key('auth-back'),
                         onPressed: busy
                             ? null
-                            : () => setState(() => createAccount = null),
+                            : () => setState(() {
+                                  createAccount = null;
+                                  passwordVisible = false;
+                                }),
                         child: const Text('Retour'),
                       ),
                     ],
@@ -12205,6 +12227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _authBusy = false;
   bool _createAccountMode = false;
+  bool _accountPasswordVisible = false;
 
   @override
   void initState() {
@@ -12371,29 +12394,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _changePassword() async {
     final controller = TextEditingController();
+    var passwordVisible = false;
     final password = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Changer le mot de passe'),
-        content: TextField(
-          controller: controller,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nouveau mot de passe',
-            helperText: '6 caractères minimum',
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Changer le mot de passe'),
+          content: TextField(
+            key: const Key('auth-new-password'),
+            controller: controller,
+            obscureText: !passwordVisible,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Nouveau mot de passe',
+              helperText: '6 caractères minimum',
+              suffixIcon: IconButton(
+                key: const Key('auth-new-password-visibility'),
+                tooltip: passwordVisible
+                    ? 'Masquer le mot de passe'
+                    : 'Afficher le mot de passe',
+                icon: Icon(
+                    passwordVisible ? Icons.visibility_off : Icons.visibility),
+                onPressed: () =>
+                    setDialogState(() => passwordVisible = !passwordVisible),
+              ),
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text),
+              child: const Text('Mettre à jour'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text),
-            child: const Text('Mettre à jour'),
-          ),
-        ],
       ),
     );
     controller.dispose();
@@ -12592,6 +12629,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onSelectionChanged: (selection) {
                         setState(() {
                           _createAccountMode = selection.first;
+                          _accountPasswordVisible = false;
                         });
                       },
                     ),
@@ -12606,11 +12644,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 12),
                     TextField(
+                      key: const Key('profile-auth-password'),
                       controller: _accountPasswordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
+                      obscureText: !_accountPasswordVisible,
+                      decoration: InputDecoration(
                         labelText: 'Mot de passe',
-                        prefixIcon: Icon(Icons.lock_outline_rounded),
+                        prefixIcon: const Icon(Icons.lock_outline_rounded),
+                        suffixIcon: IconButton(
+                          key: const Key('profile-auth-password-visibility'),
+                          tooltip: _accountPasswordVisible
+                              ? 'Masquer le mot de passe'
+                              : 'Afficher le mot de passe',
+                          icon: Icon(_accountPasswordVisible
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () => setState(() =>
+                              _accountPasswordVisible =
+                                  !_accountPasswordVisible),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
