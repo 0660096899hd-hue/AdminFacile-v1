@@ -17,6 +17,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'app_config.dart';
+import 'l10n/app_localizations.dart';
 import 'widgets/voice_input_button.dart';
 import 'signature_pad.dart';
 import 'letter_signature_service.dart';
@@ -966,7 +968,11 @@ class AdminFacileApp extends StatelessWidget {
       animation: settings,
       builder: (_, __) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'AdminFacile',
+        onGenerateTitle: (context) => AppLocalizations.of(context).appName,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: appConfig.country.supportedLocales,
+        localeListResolutionCallback: (locales, _) =>
+            appConfig.country.resolveLocale(locales),
         themeMode: settings.themePreference.themeMode,
         theme: _buildAdminTheme(Brightness.light, settings.comfortMode),
         darkTheme: _buildAdminTheme(Brightness.dark, settings.comfortMode),
