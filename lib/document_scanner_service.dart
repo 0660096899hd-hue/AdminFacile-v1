@@ -4,9 +4,11 @@ class DocumentScanResult {
   const DocumentScanResult({
     required this.imagePaths,
     this.partialResult = false,
+    this.pdfPath,
   });
   final List<String> imagePaths;
   final bool partialResult;
+  final String? pdfPath;
 
   int get pageCount => imagePaths.length;
 }
@@ -54,6 +56,10 @@ class AndroidMlKitDocumentScannerService implements DocumentScannerService {
       return DocumentScanResult(
         imagePaths: paths,
         partialResult: response['partialResult'] == true,
+        pdfPath: switch (response['pdfPath']) {
+          final String path when path.isNotEmpty => path,
+          _ => null,
+        },
       );
     } on PlatformException catch (error) {
       throw DocumentScannerUnavailableException(error, error.code);

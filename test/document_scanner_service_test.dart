@@ -20,6 +20,7 @@ void main() {
       return {
         'imagePaths': ['page_1.jpg', 'page_2.jpg', 'page_3.jpg'],
         'pageCount': 3,
+        'pdfPath': 'native.pdf',
       };
     });
 
@@ -27,6 +28,19 @@ void main() {
     expect(result, isNotNull);
     expect(result!.pageCount, 3);
     expect(result.imagePaths.last, 'page_3.jpg');
+    expect(result.pdfPath, 'native.pdf');
+  });
+
+  test('PDF natif absent conserve les JPEG multipages', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => {
+              'imagePaths': ['page_1.jpg', 'page_2.jpg'],
+              'pdfPath': null,
+            });
+
+    final result = await service.scan();
+    expect(result!.pdfPath, isNull);
+    expect(result.imagePaths, ['page_1.jpg', 'page_2.jpg']);
   });
 
   test('V19.0 traite une annulation sans erreur', () async {

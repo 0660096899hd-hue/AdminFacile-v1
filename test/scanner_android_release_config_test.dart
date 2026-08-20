@@ -57,6 +57,6 @@ void main() {
       ),
     );
     expect(gradle, contains('applicationId = "fr.adminfacile.app"'));
-    expect(pubspec, contains('version: 20.3.1+84'));
+    expect(pubspec, contains('version: 20.4.28+113'));
   });
 }

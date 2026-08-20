@@ -1,0 +1,4 @@
+[functions.gemini-proxy]
+# La fonction valide explicitement le JWT avec auth.getUser(), ce qui reste
+# compatible avec les clés Supabase asymétriques et leur rotation.
+verify_jwt = false

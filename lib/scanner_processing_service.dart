@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:image/image.dart' as img;
 import 'package:pdf/pdf.dart';
@@ -89,4 +90,46 @@ class ScannerProcessingService {
     }
     return document.save();
   }
+
+  static Future<PreparedScanPdf> preparePdf({
+    required String? nativePdfPath,
+    required List<String> jpegPaths,
+    required Directory persistentDirectory,
+    required Directory fallbackDirectory,
+  }) async {
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    if (nativePdfPath != null && nativePdfPath.isNotEmpty) {
+      try {
+        final source = File(nativePdfPath);
+        if (await source.exists() && await source.length() > 0) {
+          await persistentDirectory.create(recursive: true);
+          final target = File(
+            '${persistentDirectory.path}/scan_mlkit_native_$stamp.pdf',
+          );
+          await source.copy(target.path);
+          if (await target.length() > 0) {
+            return PreparedScanPdf(path: target.path, usedNativePdf: true);
+          }
+        }
+      } catch (_) {
+        // Le JPEG ML Kit reste la source de repli fiable.
+      }
+    }
+
+    final pages = <Uint8List>[];
+    for (final path in jpegPaths) {
+      pages.add(await File(path).readAsBytes());
+    }
+    await fallbackDirectory.create(recursive: true);
+    final output = File('${fallbackDirectory.path}/scan_mlkit_$stamp.pdf');
+    await output.writeAsBytes(await buildA4Pdf(pages), flush: true);
+    return PreparedScanPdf(path: output.path, usedNativePdf: false);
+  }
+}
+
+class PreparedScanPdf {
+  const PreparedScanPdf({required this.path, required this.usedNativePdf});
+
+  final String path;
+  final bool usedNativePdf;
 }

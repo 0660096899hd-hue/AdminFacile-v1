@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as image_lib;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -19,16 +20,20 @@ import 'package:url_launcher/url_launcher.dart';
 import 'widgets/voice_input_button.dart';
 import 'signature_pad.dart';
 import 'letter_signature_service.dart';
-import 'signature_image_service.dart';
 import 'scanner_processing_service.dart';
 import 'document_scanner_service.dart';
 import 'professional_auth_service.dart';
+import 'google_auth_service.dart';
+import 'notification_store.dart';
+import 'document_signature_service.dart';
+import 'profile_signature_service.dart';
+import 'document_translation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-const String _defaultSupabaseUrl = 'https://pmnjphgaxcmxmhurhucm.supabase.co';
-const String _defaultSupabasePublishableKey =
-    'sb_publishable_XFIAQwu98Rbgn2xFwXkKpw_DJnQrRE_';
+const String _defaultSupabaseUrl = 'https://zrijslghrjtbzzvttgzn.supabase.co';
 
+const String _defaultSupabasePublishableKey =
+    'sb_publishable_RyCZDfcFjoKc0YKXn_BgkQ_8H9nfxPD';
 const String _supabaseUrl = String.fromEnvironment(
   'SUPABASE_URL',
   defaultValue: _defaultSupabaseUrl,
@@ -45,6 +50,7 @@ bool get _supabaseConfigured =>
 bool _supabaseReady = false;
 String? _supabaseInitializationError;
 ProfessionalAuthService? _authService;
+GoogleAuthService? _googleAuthService;
 late AppSettings appSettings;
 
 User? get _currentSupabaseUser =>
@@ -62,6 +68,60 @@ String cloudOperationMessage(Object error) {
     return 'Votre session cloud n’est plus valide. Reconnectez-vous.';
   }
   return 'Le service cloud est momentanément indisponible.';
+}
+
+Map<String, dynamic> _profileRow(
+  String userId,
+  Map<String, String> profile,
+) =>
+    {
+      'user_id': userId,
+      'first_name': profile['firstName']?.trim() ?? '',
+      'last_name': profile['lastName']?.trim() ?? '',
+      'address': profile['address']?.trim() ?? '',
+      'postal_code': profile['postalCode']?.trim() ?? '',
+      'city': profile['city']?.trim() ?? '',
+      'phone': profile['phone']?.trim() ?? '',
+      'email': profile['email']?.trim() ?? '',
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+Future<void> _upsertRemoteProfile(
+  AppSettings settings,
+  User user,
+) async {
+  await Supabase.instance.client
+      .from('profiles')
+      .upsert(_profileRow(user.id, settings.profileValues))
+      .timeout(const Duration(seconds: 15));
+  await settings.markLocalProfileMigrated();
+}
+
+Future<void> _synchronizeProfileForUser(
+  AppSettings settings,
+  User user,
+) async {
+  await settings.activateProfileForUser(user.id);
+  try {
+    final remote = await Supabase.instance.client
+        .from('profiles')
+        .select()
+        .eq('user_id', user.id)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 15));
+    if (remote != null) {
+      await settings.applyRemoteProfile(remote);
+      return;
+    }
+    if (settings.hasProfileData) {
+      await _upsertRemoteProfile(settings, user);
+    }
+  } catch (error) {
+    // Le cache isolé de cet utilisateur reste disponible hors connexion.
+    debugPrint(
+      'Synchronisation du profil impossible type=${error.runtimeType}',
+    );
+  }
 }
 
 enum ProcedureCloudState { notSynced, uploading, synced, failed }
@@ -181,6 +241,9 @@ class AdministrativeProcedure {
 }
 
 class ProcedureStore extends ChangeNotifier {
+  ProcedureStore({this.notificationStore});
+
+  final NotificationStore? notificationStore;
   SharedPreferences? _prefs;
   final List<AdministrativeProcedure> _items = [];
   List<AdministrativeProcedure> get items => List.unmodifiable(_items);
@@ -213,6 +276,25 @@ class ProcedureStore extends ChangeNotifier {
   Future<void> add(AdministrativeProcedure procedure) async {
     _items.insert(0, procedure);
     await _persist();
+    await notificationStore?.add(AppNotification(
+      id: 'procedure-added-${procedure.id}',
+      type: AppNotificationType.procedureAction,
+      message:
+          'Votre démarche ${procedure.organisation.isEmpty ? procedure.title : procedure.organisation} est à compléter.',
+      createdAt: procedure.createdAt,
+      targetType: NotificationTargetType.procedure,
+      targetId: procedure.id,
+    ));
+    if (procedure.reminderDate != null) {
+      await notificationStore?.add(AppNotification(
+        id: 'procedure-reminder-${procedure.id}',
+        type: AppNotificationType.deadline,
+        message: 'Rappel important : ${procedure.title}.',
+        createdAt: procedure.createdAt,
+        targetType: NotificationTargetType.procedure,
+        targetId: procedure.id,
+      ));
+    }
     notifyListeners();
   }
 
@@ -372,6 +454,9 @@ class SavedDocument {
 }
 
 class DocumentStore extends ChangeNotifier {
+  DocumentStore({this.notificationStore});
+
+  final NotificationStore? notificationStore;
   SharedPreferences? _prefs;
   final List<SavedDocument> _documents = [];
   List<SavedDocument> get documents => List.unmodifiable(_documents);
@@ -399,6 +484,15 @@ class DocumentStore extends ChangeNotifier {
   Future<void> add(SavedDocument document) async {
     _documents.insert(0, document);
     await _persist();
+    await notificationStore?.add(AppNotification(
+      id: 'document-added-${document.id}',
+      type: AppNotificationType.documentAdded,
+      message:
+          'Votre document ${document.organisation == 'Non identifié' ? document.title : document.organisation} a été ajouté.',
+      createdAt: document.createdAt,
+      targetType: NotificationTargetType.document,
+      targetId: document.id,
+    ));
     notifyListeners();
   }
 
@@ -426,10 +520,13 @@ class DocumentStore extends ChangeNotifier {
   }
 }
 
-final ProcedureStore appProcedureStore = ProcedureStore();
+final NotificationStore appNotificationStore = NotificationStore();
+final ProcedureStore appProcedureStore =
+    ProcedureStore(notificationStore: appNotificationStore);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  validateGoogleAuthReleaseConfiguration();
 
   if (_supabaseConfigured) {
     try {
@@ -446,19 +543,32 @@ Future<void> main() async {
       _authService = ProfessionalAuthService(
         SupabaseAuthGateway(Supabase.instance.client),
       );
+      _googleAuthService = SupabaseGoogleAuthService(Supabase.instance.client);
     } catch (error, stackTrace) {
       _supabaseInitializationError = error.toString();
       debugPrint('Supabase.initialize a échoué : $error\n$stackTrace');
     }
   }
 
-  final settings = AppSettings();
+  final settings = AppSettings(
+    signatureRemoteStore: _supabaseReady
+        ? SupabaseSignatureRemoteStore(Supabase.instance.client)
+        : const UnavailableSignatureRemoteStore(),
+  );
   appSettings = settings;
-  final documentStore = DocumentStore();
+  final documentStore = DocumentStore(notificationStore: appNotificationStore);
   final procedureStore = appProcedureStore;
 
   await settings.load();
-  await Future.wait([documentStore.load(), procedureStore.load()]);
+  final initialUser = _currentSupabaseUser;
+  if (initialUser == null) {
+    settings.deactivateProfile();
+  }
+  await Future.wait([
+    documentStore.load(),
+    procedureStore.load(),
+    appNotificationStore.load(),
+  ]);
 
   runApp(
     AdminFacileApp(
@@ -469,30 +579,10 @@ Future<void> main() async {
     ),
   );
 
-  // La synchronisation réseau ne doit jamais retarder le premier écran.
-  if (settings.signatureMigratedOnLoad && settings.hasSignature) {
-    unawaited(_syncMigratedSignature(settings));
-  }
-}
-
-Future<void> _syncMigratedSignature(AppSettings settings) async {
-  final user = _currentSupabaseUser;
-  if (user == null) return;
-  try {
-    final bytes = await File(settings.signaturePath).readAsBytes();
-    await Supabase.instance.client.storage
-        .from('admin-documents')
-        .uploadBinary(
-          '${user.id}/profile/signature.png',
-          bytes,
-          fileOptions: const FileOptions(
-            upsert: true,
-            contentType: 'image/png',
-          ),
-        )
-        .timeout(const Duration(seconds: 20));
-  } catch (error) {
-    debugPrint('Synchronisation de la signature migrée impossible : $error');
+  // La restauration réseau du profil et de la signature ne retarde jamais
+  // l’affichage initial. AppSettings notifie l’interface dès qu’elle est prête.
+  if (initialUser != null) {
+    unawaited(_synchronizeProfileForUser(settings, initialUser));
   }
 }
 
@@ -513,7 +603,31 @@ extension AppThemePreferenceLabel on AppThemePreference {
 }
 
 class AppSettings extends ChangeNotifier {
+  AppSettings({
+    SignatureRemoteStore signatureRemoteStore =
+        const UnavailableSignatureRemoteStore(),
+    SignatureDirectoryProvider? signatureDirectoryProvider,
+  })  : _signatureRemoteStore = signatureRemoteStore,
+        _signatureDirectoryProvider = signatureDirectoryProvider;
+
+  static const List<String> _profileKeys = [
+    'firstName',
+    'lastName',
+    'address',
+    'postalCode',
+    'city',
+    'phone',
+    'email',
+  ];
+  static const String _legacyProfileOwnerKey = 'profileMigrationV20UserId';
+  static const String _legacyThemeOwnerKey = 'themeMigrationV204UserId';
+
   SharedPreferences? _prefs;
+  final SignatureRemoteStore _signatureRemoteStore;
+  final SignatureDirectoryProvider? _signatureDirectoryProvider;
+  ProfileSignatureService? _signatureService;
+  String? _activeProfileUserId;
+  bool _profileLoadedFromLegacyKeys = false;
   String firstName = '';
   String lastName = '';
   String address = '';
@@ -525,7 +639,7 @@ class AppSettings extends ChangeNotifier {
   String signaturePath = '';
   bool autoInsertSignature = false;
   bool signatureMigratedOnLoad = false;
-  AppThemePreference themePreference = AppThemePreference.dark;
+  AppThemePreference themePreference = AppThemePreference.light;
 
   String get greeting {
     final name = firstName.trim();
@@ -537,38 +651,191 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
-    firstName = _prefs!.getString('firstName') ?? '';
-    lastName = _prefs!.getString('lastName') ?? '';
-    address = _prefs!.getString('address') ?? '';
-    postalCode = _prefs!.getString('postalCode') ?? '';
-    city = _prefs!.getString('city') ?? '';
-    phone = _prefs!.getString('phone') ?? '';
-    email = _prefs!.getString('email') ?? '';
+    _signatureService = ProfileSignatureService(
+      preferences: _prefs!,
+      remoteStore: _signatureRemoteStore,
+      directoryProvider: _signatureDirectoryProvider,
+    );
+    _applyProfile(_readProfile(_prefs!, prefix: ''));
     comfortMode = _prefs!.getBool('comfortMode') ?? false;
-    signaturePath = _prefs!.getString('signaturePathV17') ?? '';
-    autoInsertSignature = _prefs!.getBool('autoInsertSignatureV17') ?? false;
+    signaturePath = '';
+    autoInsertSignature = false;
     final savedTheme =
-        _prefs!.getString('themePreference') ?? AppThemePreference.dark.name;
+        _prefs!.getString('themePreference') ?? AppThemePreference.light.name;
     themePreference = AppThemePreference.values.firstWhere(
       (value) => value.name == savedTheme,
-      orElse: () => AppThemePreference.dark,
+      orElse: () => AppThemePreference.light,
     );
-    signatureMigratedOnLoad = await _migrateSignatureIfNeeded();
+    signatureMigratedOnLoad = false;
   }
 
   Future<void> saveProfile(Map<String, String> values) async {
-    firstName = values['firstName']!.trim();
-    lastName = values['lastName']!.trim();
-    address = values['address']!.trim();
-    postalCode = values['postalCode']!.trim();
-    city = values['city']!.trim();
-    phone = values['phone']!.trim();
-    email = values['email']!.trim();
+    final normalized = _normalizedProfile(values);
+    _applyProfile(normalized);
     final prefs = _prefs ??= await SharedPreferences.getInstance();
-    for (final entry in values.entries) {
-      await prefs.setString(entry.key, entry.value.trim());
+    final prefix = _activeProfileUserId == null
+        ? ''
+        : _profilePrefix(_activeProfileUserId!);
+    await _writeProfile(prefs, normalized, prefix: prefix);
+    notifyListeners();
+  }
+
+  Map<String, String> get profileValues => {
+        'firstName': firstName,
+        'lastName': lastName,
+        'address': address,
+        'postalCode': postalCode,
+        'city': city,
+        'phone': phone,
+        'email': email,
+      };
+
+  bool get hasProfileData =>
+      profileValues.values.any((value) => value.trim().isNotEmpty);
+
+  Future<void> activateProfileForUser(String userId) async {
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    _activeProfileUserId = userId;
+    _profileLoadedFromLegacyKeys = false;
+    final userThemeKey = '${_profilePrefix(userId)}themePreference';
+    final scopedTheme = prefs.getString(userThemeKey);
+    final legacyTheme = prefs.getString('themePreference');
+    final legacyThemeOwner = prefs.getString(_legacyThemeOwnerKey);
+    final canClaimLegacyTheme =
+        legacyThemeOwner == null || legacyThemeOwner == userId;
+    final selectedTheme =
+        scopedTheme ?? (canClaimLegacyTheme ? legacyTheme : null);
+    themePreference = AppThemePreference.values.firstWhere(
+      (value) => value.name == selectedTheme,
+      orElse: () => AppThemePreference.light,
+    );
+    if (scopedTheme == null) {
+      await prefs.setString(userThemeKey, themePreference.name);
+      if (legacyTheme != null && canClaimLegacyTheme) {
+        await prefs.setString(_legacyThemeOwnerKey, userId);
+      }
+    }
+
+    final scoped = _readProfile(prefs, prefix: _profilePrefix(userId));
+    if (_hasProfileData(scoped)) {
+      _applyProfile(scoped);
+    } else {
+      final legacyOwner = prefs.getString(_legacyProfileOwnerKey);
+      final legacy = _readProfile(prefs, prefix: '');
+      if ((legacyOwner == null || legacyOwner == userId) &&
+          _hasProfileData(legacy)) {
+        _profileLoadedFromLegacyKeys = true;
+        _applyProfile(legacy);
+        // Les anciennes clés sans UUID sont attribuées au premier compte actif.
+        // Cela empêche tout compte connecté ensuite de voir ce cache historique,
+        // même si la synchronisation réseau échoue.
+        if (legacyOwner == null) {
+          await prefs.setString(_legacyProfileOwnerKey, userId);
+        }
+      } else {
+        _applyProfile(_emptyProfile());
+      }
+    }
+
+    final signature = await _signatureService!.activateUser(userId);
+    signaturePath = signature.path ?? '';
+    signatureMigratedOnLoad = signature.migratedLegacy;
+    autoInsertSignature =
+        signaturePath.isNotEmpty && _signatureService!.autoInsertFor(userId);
+    if (signature.remoteError != null) {
+      debugPrint(
+        'Restauration de signature distante impossible '
+        'type=${signature.remoteError.runtimeType}',
+      );
     }
     notifyListeners();
+  }
+
+  Future<void> applyRemoteProfile(Map<String, dynamic> row) async {
+    final userId = _activeProfileUserId;
+    if (userId == null) return;
+    final remote = <String, String>{
+      'firstName': row['first_name'] as String? ?? '',
+      'lastName': row['last_name'] as String? ?? '',
+      'address': row['address'] as String? ?? '',
+      'postalCode': row['postal_code'] as String? ?? '',
+      'city': row['city'] as String? ?? '',
+      'phone': row['phone'] as String? ?? '',
+      'email': row['email'] as String? ?? '',
+    };
+    _profileLoadedFromLegacyKeys = false;
+    _applyProfile(remote);
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await _writeProfile(prefs, remote, prefix: _profilePrefix(userId));
+    notifyListeners();
+  }
+
+  Future<void> markLocalProfileMigrated() async {
+    final userId = _activeProfileUserId;
+    if (userId == null) return;
+    final prefs = _prefs ??= await SharedPreferences.getInstance();
+    await _writeProfile(
+      prefs,
+      profileValues,
+      prefix: _profilePrefix(userId),
+    );
+    if (_profileLoadedFromLegacyKeys) {
+      await prefs.setString(_legacyProfileOwnerKey, userId);
+      _profileLoadedFromLegacyKeys = false;
+    }
+  }
+
+  void deactivateProfile() {
+    _activeProfileUserId = null;
+    _profileLoadedFromLegacyKeys = false;
+    _applyProfile(_emptyProfile());
+    _signatureService?.deactivateUser();
+    signaturePath = '';
+    autoInsertSignature = false;
+    signatureMigratedOnLoad = false;
+    notifyListeners();
+  }
+
+  static String _profilePrefix(String userId) => 'profile.$userId.';
+
+  static Map<String, String> _emptyProfile() => {
+        for (final key in _profileKeys) key: '',
+      };
+
+  static Map<String, String> _normalizedProfile(Map<String, String> values) => {
+        for (final key in _profileKeys) key: (values[key] ?? '').trim(),
+      };
+
+  static Map<String, String> _readProfile(
+    SharedPreferences prefs, {
+    required String prefix,
+  }) =>
+      {
+        for (final key in _profileKeys)
+          key: prefs.getString('$prefix$key') ?? '',
+      };
+
+  static bool _hasProfileData(Map<String, String> profile) =>
+      profile.values.any((value) => value.trim().isNotEmpty);
+
+  static Future<void> _writeProfile(
+    SharedPreferences prefs,
+    Map<String, String> profile, {
+    required String prefix,
+  }) async {
+    for (final key in _profileKeys) {
+      await prefs.setString('$prefix$key', (profile[key] ?? '').trim());
+    }
+  }
+
+  void _applyProfile(Map<String, String> profile) {
+    firstName = profile['firstName'] ?? '';
+    lastName = profile['lastName'] ?? '';
+    address = profile['address'] ?? '';
+    postalCode = profile['postalCode'] ?? '';
+    city = profile['city'] ?? '';
+    phone = profile['phone'] ?? '';
+    email = profile['email'] ?? '';
   }
 
   Future<void> setComfortMode(bool value) async {
@@ -581,67 +848,36 @@ class AppSettings extends ChangeNotifier {
   bool get hasSignature =>
       signaturePath.isNotEmpty && File(signaturePath).existsSync();
 
-  Future<void> saveSignatureBytes(Uint8List bytes,
-      {Directory? directory}) async {
-    directory ??= await getApplicationDocumentsDirectory();
-    final normalized =
-        await SignatureImageService.normalizeSignatureToTransparentPng(bytes);
-    final file = File('${directory.path}/adminfacile_signature_v1735.png');
-    await file.writeAsBytes(normalized, flush: true);
-    signaturePath = file.path;
-    final prefs = _prefs ??= await SharedPreferences.getInstance();
-    await prefs.setString('signaturePathV17', signaturePath);
-    await prefs.setBool('signatureTransparentPngV1735', true);
+  Future<SignatureSaveResult> saveSignatureBytes(Uint8List bytes) async {
+    final userId = _activeProfileUserId;
+    if (userId == null) {
+      throw StateError(
+          'Aucun utilisateur actif pour enregistrer la signature.');
+    }
+    final result = await _signatureService!.saveForUser(userId, bytes);
+    signaturePath = result.path;
     notifyListeners();
+    return result;
   }
 
-  Future<bool> _migrateSignatureIfNeeded() async {
-    if (signaturePath.isEmpty ||
-        (_prefs?.getBool('signatureTransparentPngV1735') ?? false)) {
-      return false;
+  Future<SignatureDeleteResult> removeSignature() async {
+    final userId = _activeProfileUserId;
+    if (userId == null) {
+      return const SignatureDeleteResult(remoteDeleted: false);
     }
-    final legacyFile = File(signaturePath);
-    if (!await legacyFile.exists()) return false;
-    try {
-      final normalized =
-          await SignatureImageService.normalizeSignatureToTransparentPng(
-        await legacyFile.readAsBytes(),
-      );
-      final directory = legacyFile.parent;
-      final migrated =
-          File('${directory.path}/adminfacile_signature_v1735.png');
-      await migrated.writeAsBytes(normalized, flush: true);
-      signaturePath = migrated.path;
-      await _prefs!.setString('signaturePathV17', signaturePath);
-      await _prefs!.setBool('signatureTransparentPngV1735', true);
-      // L’ancien fichier est volontairement conservé : aucune donnée n’est
-      // supprimée pendant la migration.
-      return true;
-    } catch (_) {
-      // L'image brute n'est plus utilisée dans les PDF après un échec.
-      signaturePath = '';
-      return false;
-    }
-  }
-
-  Future<void> removeSignature() async {
-    final file = File(signaturePath);
-    if (await file.exists()) await file.delete();
+    final result = await _signatureService!.deleteForUser(userId);
     signaturePath = '';
     autoInsertSignature = false;
-    final prefs = _prefs ??= await SharedPreferences.getInstance();
-    await prefs.remove('signaturePathV17');
-    await prefs.remove('signatureTransparentPngV1733');
-    await prefs.remove('signatureTransparentPngV1734');
-    await prefs.remove('signatureTransparentPngV1735');
-    await prefs.setBool('autoInsertSignatureV17', false);
     notifyListeners();
+    return result;
   }
 
   Future<void> setAutoInsertSignature(bool value) async {
     autoInsertSignature = value && hasSignature;
-    final prefs = _prefs ??= await SharedPreferences.getInstance();
-    await prefs.setBool('autoInsertSignatureV17', autoInsertSignature);
+    final userId = _activeProfileUserId;
+    if (userId != null) {
+      await _signatureService!.setAutoInsert(userId, autoInsertSignature);
+    }
     notifyListeners();
   }
 
@@ -649,6 +885,13 @@ class AppSettings extends ChangeNotifier {
     themePreference = value;
     final prefs = _prefs ??= await SharedPreferences.getInstance();
     await prefs.setString('themePreference', value.name);
+    final userId = _activeProfileUserId;
+    if (userId != null) {
+      await prefs.setString(
+        '${_profilePrefix(userId)}themePreference',
+        value.name,
+      );
+    }
     notifyListeners();
   }
 
@@ -742,6 +985,7 @@ abstract interface class AppAuthSession {
   bool get isServiceAvailable;
   bool get isAuthenticated;
   ProfessionalAuthService? get service;
+  GoogleAuthService? get googleService;
   Stream<bool> get changes;
 }
 
@@ -757,6 +1001,9 @@ class SupabaseAppAuthSession implements AppAuthSession {
 
   @override
   ProfessionalAuthService? get service => _authService;
+
+  @override
+  GoogleAuthService? get googleService => _googleAuthService;
 
   @override
   Stream<bool> get changes {
@@ -788,15 +1035,15 @@ class _AuthGateState extends State<AuthGate> {
   StreamSubscription<bool>? _subscription;
   bool _splashComplete = false;
   late bool _authenticated;
+  bool _profileSyncing = false;
+  int _authChangeGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _authenticated = widget.authSession.isAuthenticated;
     _subscription = widget.authSession.changes.listen(
-      (authenticated) {
-        if (mounted) setState(() => _authenticated = authenticated);
-      },
+      _handleAuthChange,
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('AUTH_GATE stream_error type=${error.runtimeType}');
         if (mounted) setState(() => _authenticated = false);
@@ -811,6 +1058,39 @@ class _AuthGateState extends State<AuthGate> {
     });
   }
 
+  Future<void> _handleAuthChange(bool authenticated) async {
+    final generation = ++_authChangeGeneration;
+    if (!authenticated) {
+      widget.settings.deactivateProfile();
+      if (mounted) {
+        setState(() {
+          _authenticated = false;
+          _profileSyncing = false;
+        });
+      }
+      return;
+    }
+
+    final user = _currentSupabaseUser;
+    if (user == null) {
+      // Une session de test ou une autre implémentation d'AppAuthSession peut
+      // ne pas exposer l'objet Supabase global. En production,
+      // SupabaseAppAuthSession.isAuthenticated exige déjà un currentUser.
+      if (mounted) {
+        setState(() => _authenticated = widget.authSession.isAuthenticated);
+      }
+      return;
+    }
+    if (mounted) setState(() => _profileSyncing = true);
+    await _synchronizeProfileForUser(widget.settings, user);
+    if (!mounted || generation != _authChangeGeneration) return;
+    final currentUser = _currentSupabaseUser;
+    setState(() {
+      _authenticated = currentUser?.id == user.id;
+      _profileSyncing = false;
+    });
+  }
+
   @override
   void dispose() {
     _subscription?.cancel();
@@ -818,6 +1098,7 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Widget _splash() => Scaffold(
+        backgroundColor: const Color(0xFF010E28),
         body: SafeArea(
           child: Center(
             child: Padding(
@@ -825,10 +1106,11 @@ class _AuthGateState extends State<AuthGate> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const _BrandLockup(
-                      markSize: 86, titleSize: 38, subtitleSize: 17),
+                  const AdminFacileMark(size: 144),
                   const SizedBox(height: 28),
-                  const CircularProgressIndicator(),
+                  const CircularProgressIndicator(
+                    color: Color(0xFF19D8F2),
+                  ),
                 ],
               ),
             ),
@@ -838,7 +1120,7 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_splashComplete) return _splash();
+    if (!_splashComplete || _profileSyncing) return _splash();
     if (!_authenticated) {
       return WelcomeAuthScreen(authSession: widget.authSession);
     }
@@ -864,6 +1146,7 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
   bool? createAccount;
   bool busy = false;
   bool passwordVisible = false;
+  bool googleBusy = false;
   String? message;
 
   @override
@@ -913,6 +1196,32 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    if (busy || googleBusy) return;
+    final service = widget.authSession.googleService;
+    if (service == null || !service.isConfigured) {
+      setState(() =>
+          message = 'La connexion Google est temporairement indisponible.');
+      return;
+    }
+    setState(() {
+      googleBusy = true;
+      message = null;
+    });
+    try {
+      await service.signIn();
+    } on GoogleAuthException catch (error) {
+      if (mounted) setState(() => message = error.userMessage);
+    } catch (error) {
+      debugPrint('GOOGLE_AUTH ui_failure type=${error.runtimeType}');
+      if (mounted) {
+        setState(() => message = 'La connexion Google a échoué. Réessayez.');
+      }
+    } finally {
+      if (mounted) setState(() => googleBusy = false);
+    }
+  }
+
   Future<void> _resetPassword() async {
     final service = widget.authSession.service;
     if (service == null) {
@@ -939,127 +1248,341 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         key: const Key('auth-welcome-screen'),
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(28),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Center(child: AdminFacileMark(size: 82)),
-                    const SizedBox(height: 18),
-                    Text('AdminFacile',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(fontWeight: FontWeight.w900)),
-                    const SizedBox(height: 8),
-                    const Text('Simplifiez vos démarches administratives',
-                        textAlign: TextAlign.center),
-                    const SizedBox(height: 30),
-                    if (createAccount == null) ...[
-                      FilledButton(
-                        key: const Key('auth-create-account'),
-                        onPressed: widget.authSession.isServiceAvailable
-                            ? () => setState(() {
-                                  createAccount = true;
-                                  passwordVisible = false;
-                                })
-                            : null,
-                        child: const Text('Créer mon compte'),
-                      ),
-                      const SizedBox(height: 10),
-                      OutlinedButton(
-                        key: const Key('auth-existing-account'),
-                        onPressed: widget.authSession.isServiceAvailable
-                            ? () => setState(() {
-                                  createAccount = false;
-                                  passwordVisible = false;
-                                })
-                            : null,
-                        child: const Text('J’ai déjà un compte'),
-                      ),
-                      if (!widget.authSession.isServiceAvailable) ...[
-                        const SizedBox(height: 16),
-                        const Text('Service temporairement indisponible.',
-                            textAlign: TextAlign.center),
-                      ],
-                    ] else ...[
-                      Text(createAccount! ? 'Créer mon compte' : 'Connexion',
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('auth-email'),
-                        controller: email,
-                        keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.email],
-                        decoration:
-                            const InputDecoration(labelText: 'Adresse e-mail'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('auth-password'),
-                        controller: password,
-                        obscureText: !passwordVisible,
-                        autofillHints: createAccount!
-                            ? const [AutofillHints.newPassword]
-                            : const [AutofillHints.password],
-                        decoration: InputDecoration(
-                          labelText: 'Mot de passe',
-                          suffixIcon: IconButton(
-                            key: const Key('auth-password-visibility'),
-                            tooltip: passwordVisible
-                                ? 'Masquer le mot de passe'
-                                : 'Afficher le mot de passe',
-                            icon: Icon(passwordVisible
-                                ? Icons.visibility_off
-                                : Icons.visibility),
-                            onPressed: () => setState(
-                                () => passwordVisible = !passwordVisible),
+        body: Stack(
+          children: [
+            const Positioned.fill(child: _AuthAdministrativeBackground()),
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(28),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Center(
+                          child: AdminFacileLogo(
+                            key: Key('auth-admin-facile-logo'),
+                            maxWidth: 360,
                           ),
                         ),
-                        onSubmitted: (_) => busy ? null : _submit(),
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        key: const Key('auth-submit'),
-                        onPressed: busy ? null : _submit,
-                        child: busy
-                            ? const SizedBox.square(
-                                dimension: 20,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2))
-                            : Text(createAccount!
-                                ? 'Créer mon compte'
-                                : 'Se connecter'),
-                      ),
-                      if (!createAccount!)
-                        TextButton(
-                          key: const Key('auth-forgot-password'),
-                          onPressed: busy ? null : _resetPassword,
-                          child: const Text('Mot de passe oublié ?'),
-                        ),
-                      TextButton(
-                        key: const Key('auth-back'),
-                        onPressed: busy
-                            ? null
-                            : () => setState(() {
-                                  createAccount = null;
-                                  passwordVisible = false;
-                                }),
-                        child: const Text('Retour'),
-                      ),
-                    ],
-                    if (message != null) ...[
-                      const SizedBox(height: 12),
-                      Text(message!,
-                          key: const Key('auth-message'),
-                          textAlign: TextAlign.center),
-                    ],
-                  ],
+                        const SizedBox(height: 30),
+                        if (createAccount == null) ...[
+                          SizedBox(
+                            height: 52,
+                            child: OutlinedButton.icon(
+                              key: const Key('auth-google'),
+                              onPressed:
+                                  widget.authSession.isServiceAvailable &&
+                                          widget.authSession.googleService
+                                                  ?.isConfigured ==
+                                              true &&
+                                          !googleBusy
+                                      ? _signInWithGoogle
+                                      : null,
+                              icon: googleBusy
+                                  ? const SizedBox.square(
+                                      dimension: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Image.asset(
+                                      'assets/google_g_logo.png',
+                                      width: 20,
+                                      height: 20,
+                                      semanticLabel: 'Google',
+                                    ),
+                              label: const Text('Continuer avec Google'),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(children: [
+                            const Expanded(child: Divider()),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('ou',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                            ),
+                            const Expanded(child: Divider()),
+                          ]),
+                          const SizedBox(height: 18),
+                          FilledButton(
+                            key: const Key('auth-create-account'),
+                            onPressed: widget.authSession.isServiceAvailable
+                                ? () => setState(() {
+                                      createAccount = true;
+                                      passwordVisible = false;
+                                    })
+                                : null,
+                            child: const Text('Créer mon compte'),
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton(
+                            key: const Key('auth-existing-account'),
+                            onPressed: widget.authSession.isServiceAvailable
+                                ? () => setState(() {
+                                      createAccount = false;
+                                      passwordVisible = false;
+                                    })
+                                : null,
+                            child: const Text('J’ai déjà un compte'),
+                          ),
+                          if (!widget.authSession.isServiceAvailable) ...[
+                            const SizedBox(height: 16),
+                            const Text('Service temporairement indisponible.',
+                                textAlign: TextAlign.center),
+                          ],
+                        ] else ...[
+                          Text(
+                              createAccount! ? 'Créer mon compte' : 'Connexion',
+                              style: Theme.of(context).textTheme.titleLarge),
+                          const SizedBox(height: 16),
+                          TextField(
+                            key: const Key('auth-email'),
+                            controller: email,
+                            keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.email],
+                            decoration: const InputDecoration(
+                                labelText: 'Adresse e-mail'),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            key: const Key('auth-password'),
+                            controller: password,
+                            obscureText: !passwordVisible,
+                            autofillHints: createAccount!
+                                ? const [AutofillHints.newPassword]
+                                : const [AutofillHints.password],
+                            decoration: InputDecoration(
+                              labelText: 'Mot de passe',
+                              suffixIcon: IconButton(
+                                key: const Key('auth-password-visibility'),
+                                tooltip: passwordVisible
+                                    ? 'Masquer le mot de passe'
+                                    : 'Afficher le mot de passe',
+                                icon: Icon(passwordVisible
+                                    ? Icons.visibility_off
+                                    : Icons.visibility),
+                                onPressed: () => setState(
+                                    () => passwordVisible = !passwordVisible),
+                              ),
+                            ),
+                            onSubmitted: (_) => busy ? null : _submit(),
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            key: const Key('auth-submit'),
+                            onPressed: busy ? null : _submit,
+                            child: busy
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : Text(createAccount!
+                                    ? 'Créer mon compte'
+                                    : 'Se connecter'),
+                          ),
+                          if (!createAccount!)
+                            TextButton(
+                              key: const Key('auth-forgot-password'),
+                              onPressed: busy ? null : _resetPassword,
+                              child: const Text('Mot de passe oublié ?'),
+                            ),
+                          TextButton(
+                            key: const Key('auth-back'),
+                            onPressed: busy
+                                ? null
+                                : () => setState(() {
+                                      createAccount = null;
+                                      passwordVisible = false;
+                                    }),
+                            child: const Text('Retour'),
+                          ),
+                        ],
+                        if (message != null) ...[
+                          const SizedBox(height: 12),
+                          Text(message!,
+                              key: const Key('auth-message'),
+                              textAlign: TextAlign.center),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _AuthAdministrativeBackground extends StatelessWidget {
+  const _AuthAdministrativeBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final color = const Color(0xFF1769C2).withValues(alpha: dark ? .045 : .085);
+    const items = <(IconData, String)>[
+      (Icons.account_balance_rounded, 'Mairie'),
+      (Icons.description_outlined, 'Documents'),
+      (Icons.health_and_safety_outlined, 'Assurance Maladie'),
+      (Icons.family_restroom_rounded, 'CAF / Allocations'),
+      (Icons.work_outline_rounded, 'France Travail'),
+      (Icons.local_post_office_outlined, 'La Poste'),
+      (Icons.account_balance_wallet_outlined, 'Banque'),
+      (Icons.receipt_long_outlined, 'Impôts'),
+      (Icons.business_outlined, 'URSSAF'),
+      (Icons.folder_copy_outlined, 'Bureautique'),
+      (Icons.elderly_rounded, 'Retraite'),
+    ];
+    return IgnorePointer(
+      key: const Key('auth-administrative-background'),
+      child: ColoredBox(
+        color: dark ? const Color(0xFF07111F) : const Color(0xFFF4F9FF),
+        child: LayoutBuilder(builder: (context, constraints) {
+          const positions = <Offset>[
+            Offset(.08, .08),
+            Offset(.72, .05),
+            Offset(.27, .21),
+            Offset(.84, .28),
+            Offset(.04, .39),
+            Offset(.57, .34),
+            Offset(.78, .51),
+            Offset(.18, .58),
+            Offset(.48, .67),
+            Offset(.82, .79),
+            Offset(.10, .84),
+          ];
+          const rotations = [
+            -.18,
+            .11,
+            -.07,
+            .16,
+            .08,
+            -.14,
+            .05,
+            -.11,
+            .13,
+            -.06,
+            .09
+          ];
+          const scales = [
+            1.12,
+            .88,
+            1.0,
+            1.18,
+            .91,
+            1.08,
+            .84,
+            1.15,
+            .96,
+            1.06,
+            .9
+          ];
+          return Stack(children: [
+            CustomPaint(
+              size: Size(constraints.maxWidth, constraints.maxHeight),
+              painter: _AdministrativeMotifsPainter(color),
+            ),
+            for (var index = 0; index < items.length; index++)
+              Positioned(
+                left: (positions[index].dx * constraints.maxWidth -
+                        (constraints.maxWidth < 390 ? 48 : 60))
+                    .clamp(
+                        0,
+                        constraints.maxWidth -
+                            (constraints.maxWidth < 390 ? 96 : 120)),
+                top: (positions[index].dy * constraints.maxHeight - 32)
+                    .clamp(0, constraints.maxHeight - 72),
+                child: Transform.rotate(
+                  angle: rotations[index],
+                  child: Transform.scale(
+                    scale: scales[index],
+                    child: SizedBox(
+                      width: constraints.maxWidth < 390 ? 96 : 120,
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(items[index].$1,
+                            color: color,
+                            size: constraints.maxWidth < 390 ? 36 : 42),
+                        const SizedBox(height: 3),
+                        Text(items[index].$2,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: color,
+                                fontSize: constraints.maxWidth < 390 ? 10 : 12,
+                                fontWeight: FontWeight.w800)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+          ]);
+        }),
+      ),
+    );
+  }
+}
+
+class _AdministrativeMotifsPainter extends CustomPainter {
+  const _AdministrativeMotifsPainter(this.color);
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    for (var i = 0; i < 7; i++) {
+      canvas.drawCircle(Offset(18 + i * 9, size.height * .42), 1.5, paint);
+    }
+    final wave = Path()..moveTo(size.width - 82, size.height * .61);
+    for (var i = 0; i < 4; i++) {
+      wave.relativeQuadraticBezierTo(10, -8, 20, 0);
+      wave.relativeQuadraticBezierTo(10, 8, 20, 0);
+    }
+    canvas.drawPath(wave, paint);
+    canvas.drawRect(
+        Rect.fromCenter(
+            center: Offset(size.width * .16, size.height * .88),
+            width: 12,
+            height: 12),
+        paint);
+    canvas.drawCircle(Offset(size.width * .84, size.height * .19), 7, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _AdministrativeMotifsPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class AdminFacileLogo extends StatelessWidget {
+  const AdminFacileLogo({super.key, this.maxWidth = 340});
+
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: AspectRatio(
+          aspectRatio: 800 / 441,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.asset(
+              'assets/branding/admin_facile_logo.png',
+              key: const Key('admin-facile-logo-image'),
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              semanticLabel:
+                  'ADMIN FACILE. Vos démarches administratives, simplifiées par l’IA',
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: _BrandLockup(
+                  markSize: 82,
+                  titleSize: 34,
+                  subtitleSize: 13,
                 ),
               ),
             ),
@@ -1076,7 +1599,19 @@ class AdminFacileMark extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
         width: size,
         height: size,
-        child: CustomPaint(painter: _ShieldLogoPainter()),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(size * .2),
+          child: Image.asset(
+            'assets/branding/admin_facile_icon.png',
+            key: const Key('admin-facile-icon-image'),
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            filterQuality: FilterQuality.high,
+            semanticLabel: 'Symbole Admin Facile',
+            errorBuilder: (context, error, stackTrace) =>
+                CustomPaint(painter: _ShieldLogoPainter()),
+          ),
+        ),
       );
 }
 
@@ -1166,10 +1701,12 @@ class AppShell extends StatefulWidget {
     required this.settings,
     required this.documentStore,
     required this.procedureStore,
+    this.notificationStore,
   });
   final AppSettings settings;
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
+  final NotificationStore? notificationStore;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -1179,6 +1716,8 @@ class _AppShellState extends State<AppShell> {
   int index = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   StreamSubscription<AuthState>? _authSubscription;
+  NotificationStore get _notifications =>
+      widget.notificationStore ?? appNotificationStore;
 
   @override
   void initState() {
@@ -1215,6 +1754,14 @@ class _AppShellState extends State<AppShell> {
                 documentStore: widget.documentStore,
                 procedureStore: widget.procedureStore,
                 settings: widget.settings))),
+        notificationStore: _notifications,
+        openNotifications: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => NotificationsScreen(
+            store: _notifications,
+            documentStore: widget.documentStore,
+            procedureStore: widget.procedureStore,
+          ),
+        )),
         openScanner: () => setState(() => index = 1),
         openLetters: () => setState(() => index = 2),
         openSearch: () => Navigator.of(context).push(MaterialPageRoute(
@@ -1385,7 +1932,7 @@ class _AdminDrawer extends StatelessWidget {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text('AdminFacile',
+                    Text('ADMIN FACILE',
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 21,
@@ -1524,6 +2071,196 @@ class _DrawerEntry extends StatelessWidget {
         trailing: const Icon(Icons.chevron_right_rounded, size: 20),
         onTap: onTap,
       ));
+}
+
+class NotificationsScreen extends StatelessWidget {
+  const NotificationsScreen({
+    super.key,
+    required this.store,
+    required this.documentStore,
+    required this.procedureStore,
+  });
+
+  final NotificationStore store;
+  final DocumentStore documentStore;
+  final ProcedureStore procedureStore;
+
+  String _dateTime(DateTime value) {
+    final local = value.toLocal();
+    final now = DateTime.now();
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    if (local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day) {
+      return 'Aujourd’hui à $time';
+    }
+    return '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/${local.year} à $time';
+  }
+
+  IconData _icon(AppNotificationType type) => switch (type) {
+        AppNotificationType.deadline => Icons.event_rounded,
+        AppNotificationType.procedureAction => Icons.assignment_outlined,
+        AppNotificationType.documentAdded => Icons.note_add_outlined,
+        AppNotificationType.synchronized => Icons.cloud_done_outlined,
+        AppNotificationType.synchronizationError => Icons.cloud_off_outlined,
+        AppNotificationType.documentAction => Icons.task_outlined,
+        AppNotificationType.reminder => Icons.notifications_active_outlined,
+        AppNotificationType.account => Icons.manage_accounts_outlined,
+      };
+
+  Future<void> _open(BuildContext context, AppNotification item) async {
+    await store.markRead(item.id);
+    if (!context.mounted) return;
+    if (item.targetType == NotificationTargetType.document) {
+      final document = documentStore.documents
+          .where((value) => value.id == item.targetId)
+          .firstOrNull;
+      if (document != null) {
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => _NotificationDocumentScreen(document: document),
+        ));
+      }
+    } else if (item.targetType == NotificationTargetType.procedure) {
+      final procedure = procedureStore.items
+          .where((value) => value.id == item.targetId)
+          .firstOrNull;
+      if (procedure != null) {
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => _NotificationProcedureScreen(procedure: procedure),
+        ));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: const Key('notifications-screen'),
+        appBar: AppBar(
+          title: const Text('Notifications'),
+          actions: [
+            AnimatedBuilder(
+              animation: store,
+              builder: (context, _) =>
+                  store.items.length > 1 && store.unreadCount > 0
+                      ? TextButton(
+                          key: const Key('notifications-mark-all-read'),
+                          onPressed: store.markAllRead,
+                          child: const Text('Tout marquer comme lu'),
+                        )
+                      : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+        body: AnimatedBuilder(
+          animation: store,
+          builder: (context, _) {
+            if (store.items.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.notifications_none_rounded, size: 52),
+                      SizedBox(height: 16),
+                      Text('Aucune notification pour le moment',
+                          textAlign: TextAlign.center),
+                      SizedBox(height: 8),
+                      Text(
+                        'Les rappels et informations importantes apparaîtront ici.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: store.items.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final item = store.items[index];
+                return Card(
+                  child: ListTile(
+                    key: Key('notification-${item.id}'),
+                    leading: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CircleAvatar(child: Icon(_icon(item.type))),
+                        if (!item.read)
+                          const Positioned(
+                            key: Key('notification-unread-indicator'),
+                            right: -1,
+                            top: -1,
+                            child: CircleAvatar(
+                              radius: 5,
+                              backgroundColor: Color(0xFF2588FF),
+                            ),
+                          ),
+                      ],
+                    ),
+                    title: Text(item.message),
+                    subtitle: Text(_dateTime(item.createdAt)),
+                    trailing: item.targetType == null
+                        ? null
+                        : const Icon(Icons.chevron_right_rounded),
+                    onTap: () => _open(context, item),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      );
+}
+
+class _NotificationDocumentScreen extends StatelessWidget {
+  const _NotificationDocumentScreen({required this.document});
+  final SavedDocument document;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: const Key('notification-document-target'),
+        appBar: AppBar(title: Text(document.title)),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(document.organisation,
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text('${document.category} • ${document.status}'),
+            if (document.extractedText.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              SelectableText(document.extractedText),
+            ],
+          ],
+        ),
+      );
+}
+
+class _NotificationProcedureScreen extends StatelessWidget {
+  const _NotificationProcedureScreen({required this.procedure});
+  final AdministrativeProcedure procedure;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        key: const Key('notification-procedure-target'),
+        appBar: AppBar(title: Text(procedure.title)),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(procedure.organisation,
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text('${procedure.category} • ${procedure.status.label}'),
+            const SizedBox(height: 20),
+            SelectableText(procedure.letter),
+          ],
+        ),
+      );
 }
 
 class GlobalSearchScreen extends StatefulWidget {
@@ -2323,11 +3060,14 @@ class LegacyHomeScreen extends StatelessWidget {
     required this.openMenu,
     required this.openGlobalSearch,
     required this.openProfile,
+    this.notificationStore,
+    this.openNotifications,
   });
 
   final AppSettings settings;
   final DocumentStore documentStore;
   final ProcedureStore procedureStore;
+  final NotificationStore? notificationStore;
   final VoidCallback openScanner;
   final VoidCallback openLetters;
   final VoidCallback openSearch;
@@ -2341,10 +3081,14 @@ class LegacyHomeScreen extends StatelessWidget {
   final VoidCallback openMenu;
   final VoidCallback openGlobalSearch;
   final VoidCallback openProfile;
+  final VoidCallback? openNotifications;
+
+  NotificationStore get _notificationStore =>
+      notificationStore ?? appNotificationStore;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: procedureStore,
+        animation: Listenable.merge([procedureStore, _notificationStore]),
         builder: (context, _) {
           final active = procedureStore.items
               .where(
@@ -2385,8 +3129,9 @@ class LegacyHomeScreen extends StatelessWidget {
                       settings: settings,
                       openMenu: openMenu,
                       openSearch: openGlobalSearch,
+                      openNotifications: openNotifications ?? () {},
                       openProfile: openProfile,
-                      notificationCount: reminders),
+                      notificationCount: _notificationStore.unreadCount),
                   const SizedBox(height: 20),
                   _DarkHeroCard(
                       onScan: openScanner,
@@ -2459,12 +3204,14 @@ class _DarkHeader extends StatelessWidget {
       required this.settings,
       required this.openMenu,
       required this.openSearch,
+      required this.openNotifications,
       required this.openProfile,
       required this.notificationCount});
   final String greeting;
   final AppSettings settings;
   final VoidCallback openMenu;
   final VoidCallback openSearch;
+  final VoidCallback openNotifications;
   final VoidCallback openProfile;
   final int notificationCount;
   @override
@@ -2480,15 +3227,15 @@ class _DarkHeader extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('AdminFacile',
+                  Text('ADMIN FACILE',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
                           ?.copyWith(fontWeight: FontWeight.w900)),
-                  Text('Votre assistant administratif',
-                      maxLines: 1,
+                  Text('Vos démarches administratives, simplifiées par l’IA',
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall),
                 ],
@@ -2508,9 +3255,12 @@ class _DarkHeader extends StatelessWidget {
         const SizedBox(width: 6),
         Stack(clipBehavior: Clip.none, children: [
           _HeaderCircle(
-              icon: Icons.notifications_none_rounded, onTap: openSearch),
+              key: const Key('dashboard-notifications'),
+              icon: Icons.notifications_none_rounded,
+              onTap: openNotifications),
           if (notificationCount > 0)
             Positioned(
+                key: const Key('dashboard-notification-badge'),
                 right: -2,
                 top: -5,
                 child: CircleAvatar(
@@ -2618,156 +3368,276 @@ class _DarkHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, c) {
+        final phoneLayout = c.maxWidth < 600;
         final compact = c.maxWidth < 390;
         final configured = GeminiDocumentAnalyzer.isConfigured;
-        return Container(
-          constraints: const BoxConstraints(minHeight: 270),
-          padding: EdgeInsets.all(compact ? 18 : 24),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF073B94), Color(0xFF041A3C), Color(0xFF072757)],
-            ),
-            border: Border.all(color: const Color(0xFF1477FF)),
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: const [
-              BoxShadow(
-                  color: Color(0x55000000),
-                  blurRadius: 24,
-                  offset: Offset(0, 10))
-            ],
-          ),
-          child: Row(children: [
-            Expanded(
-              flex: compact ? 7 : 6,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: configured
-                            ? const Color(0xFF0B9B69)
-                            : const Color(0xFFB66B10),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(
-                            configured
-                                ? Icons.check_circle
-                                : Icons.info_outline,
-                            color: Colors.white,
-                            size: 15),
-                        const SizedBox(width: 6),
-                        Text(
-                          configured ? 'GEMINI CONNECTÉ' : 'IA À CONFIGURER',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w900),
-                        ),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Simplifiez vos démarches au quotidien',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: compact ? 24 : 29,
-                        height: 1.1,
-                        fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Générez, envoyez et suivez vos courriers administratifs simplement.',
-                    style: TextStyle(
-                        color: const Color(0xFFD7E2F3),
-                        fontSize: compact ? 13 : 15,
-                        height: 1.4),
-                  ),
-                  const SizedBox(height: 17),
-                  Wrap(spacing: 9, runSpacing: 9, children: [
-                    FilledButton.icon(
-                      key: const Key('create-letter-v17'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF075CF5),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () => _chooseLetterMethod(context),
-                      icon: const Icon(Icons.edit_note_rounded),
-                      label: const Text('Créer une lettre',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Color(0xFF72AAFF)),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: onScan,
-                      icon: const Icon(Icons.document_scanner_rounded),
-                      label: const Text('Scanner un document',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
-                    ),
-                  ]),
-                ],
+        final illustrationHeight = phoneLayout
+            ? compact
+                ? 250.0
+                : 270.0
+            : 377.0;
+        final illustration = SizedBox(
+          key: const Key('home-letter-illustration'),
+          height: illustrationHeight,
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: 912 / 1156,
+              child: SizedBox(
+                key: const Key('home-hero-photo-frame'),
+                child: const _HomeLetterFeatherIllustration(),
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: compact ? 3 : 4,
-              child: SizedBox(
-                height: 205,
-                child: Stack(alignment: Alignment.center, children: [
-                  Container(
-                    width: 122,
-                    height: 166,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7FAFF),
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: const [
-                        BoxShadow(
-                            color: Color(0x66000000),
-                            blurRadius: 20,
-                            offset: Offset(0, 10))
-                      ],
-                    ),
-                    child: const Icon(Icons.description_rounded,
-                        color: Color(0xFF75A9F6), size: 82),
+          ),
+        );
+        final createButton = FilledButton.icon(
+          key: const Key('create-letter-v17'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: const Color(0xFF075CF5),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          onPressed: () => _chooseLetterMethod(context),
+          icon: const Icon(Icons.edit_note_rounded),
+          label: const Text(
+            'Créer une lettre',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+        );
+        final scanButton = FilledButton.icon(
+          key: const Key('home-scan-document-button'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFFFA51F),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          onPressed: onScan,
+          icon: const Icon(Icons.document_scanner_rounded),
+          label: const Text(
+            'Scanner un document',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+        );
+        final copyAndActions = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                decoration: BoxDecoration(
+                  color: configured
+                      ? const Color(0xFF0B9B69)
+                      : const Color(0xFFB66B10),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                    configured ? Icons.check_circle : Icons.info_outline,
+                    color: Colors.white,
+                    size: 15,
                   ),
-                  const Positioned(
-                      right: 0,
-                      top: 38,
-                      child: CircleAvatar(
-                          radius: 32,
-                          backgroundColor: Color(0xFF0965EB),
-                          child: Icon(Icons.auto_awesome,
-                              color: Colors.white, size: 38))),
-                  const Positioned(
-                      left: 0,
-                      bottom: 18,
-                      child: Icon(Icons.psychology_alt_rounded,
-                          color: Color(0xFFFFC72C), size: 58)),
+                  const SizedBox(width: 6),
+                  Text(
+                    configured
+                        ? 'ASSISTANT IA DISPONIBLE'
+                        : 'ASSISTANT IA INDISPONIBLE',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ]),
               ),
             ),
+            const SizedBox(height: 16),
+            Text(
+              'Simplifiez vos démarches au quotidien',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: phoneLayout
+                    ? compact
+                        ? 24
+                        : 26
+                    : 31,
+                height: 1.08,
+                letterSpacing: -.55,
+                fontWeight: FontWeight.w900,
+                shadows: const [
+                  Shadow(
+                    color: Color(0x33000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Générez, envoyez et suivez vos courriers administratifs simplement.',
+              style: TextStyle(
+                color: const Color(0xFFD7E2F3),
+                fontSize: phoneLayout ? 13 : 15,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (phoneLayout)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  createButton,
+                  const SizedBox(height: 10),
+                  scanButton,
+                ],
+              )
+            else
+              Wrap(
+                spacing: 9,
+                runSpacing: 9,
+                children: [createButton, scanButton],
+              ),
+          ],
+        );
+        return Container(
+          key: const Key('home-hero-card'),
+          constraints: BoxConstraints(minHeight: phoneLayout ? 0 : 300),
+          padding: EdgeInsets.fromLTRB(
+            phoneLayout ? 18 : 28,
+            phoneLayout ? 21 : 28,
+            phoneLayout ? 18 : 22,
+            phoneLayout ? 21 : 28,
+          ),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment(-1, -.85),
+              end: Alignment(1, .8),
+              colors: [
+                Color(0xFF041A3D),
+                Color(0xFF062B68),
+                Color(0xFF084DA8),
+              ],
+              stops: [0, .54, 1],
+            ),
+            border: Border.all(color: const Color(0xFF3C8DFF), width: 1.1),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x4D001838),
+                  blurRadius: 30,
+                  offset: Offset(0, 15)),
+              BoxShadow(
+                  color: Color(0x332D83FF),
+                  blurRadius: 22,
+                  offset: Offset(0, 3)),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(children: [
+            const Positioned(
+              right: -70,
+              top: -95,
+              child: _HeroGlowOrb(size: 245),
+            ),
+            if (phoneLayout)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  copyAndActions,
+                  const SizedBox(height: 18),
+                  illustration,
+                ],
+              )
+            else
+              Row(children: [
+                Expanded(flex: 6, child: copyAndActions),
+                const SizedBox(width: 14),
+                Expanded(flex: 5, child: illustration),
+              ]),
           ]),
         );
       });
+}
+
+class _HeroGlowOrb extends StatelessWidget {
+  const _HeroGlowOrb({required this.size});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+        child: Container(
+          width: size,
+          height: size,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient:
+                RadialGradient(colors: [Color(0x553E9CFF), Color(0x001C65C7)]),
+          ),
+        ),
+      );
+}
+
+class _HomeLetterFeatherIllustration extends StatelessWidget {
+  const _HomeLetterFeatherIllustration();
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => Center(
+          child: IgnorePointer(
+            child: ShaderMask(
+              key: const Key('home-hero-horizontal-fade'),
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (bounds) => const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Colors.transparent,
+                  Colors.white,
+                  Colors.white,
+                  Colors.transparent,
+                ],
+                stops: [0, .2, .92, 1],
+              ).createShader(bounds),
+              child: ShaderMask(
+                key: const Key('home-hero-vertical-fade'),
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (bounds) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.white,
+                    Colors.white,
+                    Colors.transparent,
+                  ],
+                  stops: [0, .06, .94, 1],
+                ).createShader(bounds),
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  height: constraints.maxHeight,
+                  child: Image.asset(
+                    'assets/images/hero_plume_document.jpg',
+                    key: const Key('home-large-feather'),
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
 }
 
 class _ShortcutGrid extends StatelessWidget {
@@ -3245,8 +4115,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
   String? scanError;
   String? imagePath;
   String? pdfPath;
+  String? _unsignedPdfPath;
+  List<NormalizedSignaturePlacement> _signaturePlacements = const [];
   List<String> _sourceScanImagePaths = const [];
   List<String> _renderedScanImagePaths = const [];
+  List<String> _ocrPageTexts = const [];
   int scannedPages = 0;
   bool ocrAttempted = false;
   int ocrCharacterCount = 0;
@@ -3264,7 +4137,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
     super.dispose();
   }
 
-  Future<void> _renderCapturedImages({bool refreshOcr = true}) async {
+  Future<void> _renderCapturedImages({
+    bool refreshOcr = true,
+    String? nativePdfPath,
+  }) async {
     if (_sourceScanImagePaths.isEmpty) return;
     setState(() {
       processing = true;
@@ -3273,20 +4149,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
     });
     try {
       final directory = await getTemporaryDirectory();
-      final pdfPages = <Uint8List>[];
-      for (final path in _sourceScanImagePaths) {
-        pdfPages.add(await File(path).readAsBytes());
-      }
       final renderedPaths = List<String>.unmodifiable(_sourceScanImagePaths);
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      final output = File('${directory.path}/scan_mlkit_$stamp.pdf');
-      await output.writeAsBytes(
-        await ScannerProcessingService.buildA4Pdf(pdfPages),
-        flush: true,
+      final preparedPdf = await ScannerProcessingService.preparePdf(
+        nativePdfPath: nativePdfPath,
+        jpegPaths: renderedPaths,
+        persistentDirectory: await getApplicationDocumentsDirectory(),
+        fallbackDirectory: directory,
       );
       if (!mounted) return;
       setState(() {
-        pdfPath = output.path;
+        pdfPath = preparedPdf.path;
+        _unsignedPdfPath = preparedPdf.path;
+        _signaturePlacements = const [];
         imagePath = renderedPaths.first;
         _renderedScanImagePaths = renderedPaths;
         scannedPages = renderedPaths.length;
@@ -3316,6 +4190,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       scanError = null;
       imagePath = path;
       textController.clear();
+      _ocrPageTexts = const [];
       ocrAttempted = true;
       ocrCharacterCount = 0;
       ocrError = null;
@@ -3327,6 +4202,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (!mounted) return;
       final recognizedText = result.text.trim();
       textController.text = recognizedText;
+      _ocrPageTexts = [recognizedText];
       ocrCharacterCount = recognizedText.length;
       if (recognizedText.isEmpty) {
         ocrError =
@@ -3357,8 +4233,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
     ocrError = null;
     ocrCharacterCount = 0;
     textController.clear();
+    _ocrPageTexts = const [];
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final buffer = StringBuffer();
+    final pageTexts = <String>[];
     try {
       for (var index = 0; index < paths.length && index < 10; index++) {
         final file = File(paths[index]);
@@ -3368,6 +4246,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         final recognized =
             await recognizer.processImage(InputImage.fromFilePath(file.path));
         final pageText = recognized.text.trim();
+        pageTexts.add(pageText);
         if (pageText.isNotEmpty) {
           if (buffer.isNotEmpty) {
             buffer.writeln('\n--- Page ${index + 1} ---\n');
@@ -3377,6 +4256,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       }
       final text = buffer.toString().trim();
       textController.text = text;
+      _ocrPageTexts = List<String>.unmodifiable(pageTexts);
       ocrCharacterCount = text.length;
       if (text.isEmpty) {
         ocrError =
@@ -3392,6 +4272,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     ocrError = null;
     ocrCharacterCount = 0;
     textController.clear();
+    _ocrPageTexts = const [];
     if (path.startsWith('content://')) {
       throw const FileSystemException(
         'Le PDF doit être copié dans le stockage de l’application avant la reconnaissance du texte.',
@@ -3404,6 +4285,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final buffer = StringBuffer();
+    final pageTexts = <String>[];
     final temp = await getTemporaryDirectory();
     int pageIndex = 0;
     try {
@@ -3418,6 +4300,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         final recognized = await recognizer
             .processImage(InputImage.fromFilePath(pageFile.path));
         final pageText = recognized.text.trim();
+        pageTexts.add(pageText);
         if (pageText.isNotEmpty) {
           if (buffer.isNotEmpty) {
             buffer.writeln('\n--- Page ${pageIndex + 1} ---\n');
@@ -3428,6 +4311,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       }
       final text = buffer.toString().trim();
       textController.text = text;
+      _ocrPageTexts = List<String>.unmodifiable(pageTexts);
       ocrCharacterCount = text.length;
       if (text.isEmpty) {
         ocrError =
@@ -3495,11 +4379,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
         ocrAttempted = false;
         ocrCharacterCount = 0;
         textController.clear();
+        _ocrPageTexts = const [];
         _sourceScanImagePaths = paths;
         _renderedScanImagePaths = const [];
       });
 
-      await _renderCapturedImages();
+      await _renderCapturedImages(nativePdfPath: result.pdfPath);
 
       if (!mounted) return;
       setState(() => processingStep = DocumentProcessingStep.completed);
@@ -3537,8 +4422,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
           source: source, imageQuality: 92, maxWidth: 2200);
       if (file == null) return;
       pdfPath = null;
+      _unsignedPdfPath = null;
+      _signaturePlacements = const [];
       _sourceScanImagePaths = const [];
       _renderedScanImagePaths = const [];
+      _ocrPageTexts = const [];
       scannedPages = 0;
       await _readImage(file.path);
     } catch (error) {
@@ -3570,17 +4458,23 @@ class _ScannerScreenState extends State<ScannerScreen> {
         setState(() {
           imagePath = null;
           pdfPath = null;
+          _unsignedPdfPath = null;
+          _signaturePlacements = const [];
           _sourceScanImagePaths = const [];
           _renderedScanImagePaths = const [];
           textController.text = content;
+          _ocrPageTexts = [content];
         });
       } else if (extension == 'pdf') {
         if (!mounted) return;
         setState(() {
           imagePath = null;
           pdfPath = path;
+          _unsignedPdfPath = path;
+          _signaturePlacements = const [];
           _sourceScanImagePaths = const [];
           _renderedScanImagePaths = const [];
+          _ocrPageTexts = const [];
           scannedPages = 0;
           processing = true;
           processingStep = DocumentProcessingStep.ocr;
@@ -3606,14 +4500,89 @@ class _ScannerScreenState extends State<ScannerScreen> {
         }
       } else {
         pdfPath = null;
+        _unsignedPdfPath = null;
+        _signaturePlacements = const [];
         _sourceScanImagePaths = const [];
         _renderedScanImagePaths = const [];
+        _ocrPageTexts = const [];
         await _readImage(path);
       }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Import impossible : $error')));
+    }
+  }
+
+  Future<List<Uint8List>> _editablePageImages() async {
+    final sourcePdf = _unsignedPdfPath ?? pdfPath;
+    if (sourcePdf != null && !sourcePdf.startsWith('content://')) {
+      final pages = <Uint8List>[];
+      await for (final page
+          in Printing.raster(await File(sourcePdf).readAsBytes(), dpi: 180)) {
+        pages.add(await page.toPng());
+      }
+      if (pages.isNotEmpty) return pages;
+    }
+    if (_renderedScanImagePaths.isNotEmpty) {
+      return Future.wait(_renderedScanImagePaths
+          .map(File.new)
+          .map((file) => file.readAsBytes()));
+    }
+    final sourceImage = imagePath;
+    if (sourceImage != null && await File(sourceImage).exists()) {
+      return [await File(sourceImage).readAsBytes()];
+    }
+    throw const FileSystemException('Aucune page modifiable n’est disponible.');
+  }
+
+  Future<void> _addSignatureToDocument() async {
+    if (!appSettings.hasSignature) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enregistrez d’abord votre signature dans votre profil.'),
+      ));
+      return;
+    }
+    setState(() => processing = true);
+    try {
+      final pages = await _editablePageImages();
+      final signature = await File(appSettings.signaturePath).readAsBytes();
+      if (!mounted) return;
+      final placements =
+          await Navigator.of(context).push<List<NormalizedSignaturePlacement>>(
+        MaterialPageRoute(
+          builder: (_) => _DocumentSignatureEditor(
+            pages: pages,
+            signaturePng: signature,
+            initialPlacements: _signaturePlacements,
+          ),
+        ),
+      );
+      if (placements == null || placements.isEmpty || !mounted) return;
+      final signedPath = await DocumentSignatureService.createSignedCopy(
+        pageImages: pages,
+        signaturePng: signature,
+        placements: placements,
+        outputDirectory: await getApplicationDocumentsDirectory(),
+      );
+      if (!mounted) return;
+      setState(() {
+        pdfPath = signedPath;
+        _signaturePlacements = List.unmodifiable(placements);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Une copie signée du document a été créée.')),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Signature du document impossible : $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Signature impossible : $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => processing = false);
     }
   }
 
@@ -3737,6 +4706,19 @@ class _ScannerScreenState extends State<ScannerScreen> {
         builder: (_) => SmartAnalysisScreen(
             sourceText: textController.text,
             procedureStore: widget.procedureStore)));
+  }
+
+  Future<void> _openDocumentTranslation() async {
+    final recognizedText = textController.text.trim();
+    if (recognizedText.isEmpty) return;
+    final pages = _ocrPageTexts.any((page) => page.trim().isNotEmpty)
+        ? _ocrPageTexts
+        : [recognizedText];
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DocumentTranslationScreen(pageTexts: pages),
+      ),
+    );
   }
 
   Future<void> _correctAnalysis() async {
@@ -4060,6 +5042,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 icon: const Icon(Icons.upload_file_outlined),
                 label: const Text('Importer'))),
       ]),
+      if (!processing && (pdfPath != null || imagePath != null)) ...[
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            key: const Key('scanner-add-signature'),
+            onPressed: _addSignatureToDocument,
+            icon: const Icon(Icons.draw_outlined),
+            label: const Text('Ajouter ma signature'),
+          ),
+        ),
+      ],
       const SizedBox(height: 20),
       if (processing)
         Card(
@@ -4217,7 +5211,17 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 height: 220, width: double.infinity, fit: BoxFit.contain)),
         const SizedBox(height: 18),
       ],
-      if (textController.text.trim().isNotEmpty)
+      if (textController.text.trim().isNotEmpty) ...[
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            key: const Key('scanner-translate'),
+            onPressed: _openDocumentTranslation,
+            icon: const Icon(Icons.translate_rounded),
+            label: const Text('Traduire'),
+          ),
+        ),
+        const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerRight,
           child: PopupMenuButton<String>(
@@ -4278,9 +5282,392 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ],
           ),
         ),
+      ],
       const SizedBox(height: 18),
       const PrivacyCard(),
     ]));
+  }
+}
+
+class _DocumentSignatureEditor extends StatefulWidget {
+  const _DocumentSignatureEditor({
+    required this.pages,
+    required this.signaturePng,
+    required this.initialPlacements,
+  });
+
+  final List<Uint8List> pages;
+  final Uint8List signaturePng;
+  final List<NormalizedSignaturePlacement> initialPlacements;
+
+  @override
+  State<_DocumentSignatureEditor> createState() =>
+      _DocumentSignatureEditorState();
+}
+
+class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
+  late final List<NormalizedSignaturePlacement> placements = [
+    ...widget.initialPlacements
+  ];
+  late final double signatureAspectRatio;
+  int pageIndex = 0;
+  NormalizedSignaturePlacement? _gestureStart;
+  Offset _focalStart = Offset.zero;
+  NormalizedSignaturePlacement? _resizeHandleStart;
+  double _resizeHandleDelta = 0;
+  final TransformationController _pageTransformation =
+      TransformationController();
+  double _pageZoom = 1;
+  TapDownDetails? _doubleTapDetails;
+
+  @override
+  void initState() {
+    super.initState();
+    final signature = image_lib.decodeImage(widget.signaturePng);
+    signatureAspectRatio =
+        signature == null ? 2.5 : signature.width / signature.height;
+    _pageTransformation.addListener(_onPageTransformationChanged);
+  }
+
+  @override
+  void dispose() {
+    _pageTransformation
+      ..removeListener(_onPageTransformationChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onPageTransformationChanged() {
+    final zoom = SignatureViewportTransform.clampZoom(
+        _pageTransformation.value.getMaxScaleOnAxis());
+    if ((zoom - _pageZoom).abs() > .005 && mounted) {
+      setState(() => _pageZoom = zoom);
+    }
+  }
+
+  void _resetPageZoom() {
+    _pageTransformation.value = Matrix4.identity();
+  }
+
+  void _togglePageZoom() {
+    if (_pageZoom > 1.01) {
+      _resetPageZoom();
+      return;
+    }
+    final position = _doubleTapDetails?.localPosition ?? Offset.zero;
+    const scale = 2.0;
+    _pageTransformation.value = Matrix4.diagonal3Values(scale, scale, 1)
+      ..setTranslationRaw(
+          position.dx * (1 - scale), position.dy * (1 - scale), 0);
+  }
+
+  void _selectPage(int index) {
+    setState(() => pageIndex = index);
+    _resetPageZoom();
+  }
+
+  NormalizedSignaturePlacement? get currentPlacement {
+    for (final placement in placements) {
+      if (placement.pageIndex == pageIndex) return placement;
+    }
+    return null;
+  }
+
+  void _replaceCurrent(NormalizedSignaturePlacement placement) {
+    setState(() {
+      placements.removeWhere((item) => item.pageIndex == pageIndex);
+      placements.add(placement);
+    });
+  }
+
+  void _addCurrent(double pageAspect) {
+    final width = .34;
+    final height = width * pageAspect / signatureAspectRatio;
+    _replaceCurrent(NormalizedSignaturePlacement(
+      pageIndex: pageIndex,
+      x: .5 - width / 2,
+      y: .68,
+      width: width,
+      height: height,
+    ).constrained());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decoded = image_lib.decodeImage(widget.pages[pageIndex]);
+    final pageAspect =
+        decoded == null ? 1 / 1.414 : decoded.width / decoded.height;
+    final placement = currentPlacement;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Placer ma signature'),
+        leading: IconButton(
+          key: const Key('signature-editor-cancel'),
+          tooltip: 'Annuler',
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          if (widget.pages.length > 1)
+            SizedBox(
+              height: 58,
+              child: ListView.separated(
+                key: const Key('signature-page-selector'),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                scrollDirection: Axis.horizontal,
+                itemCount: widget.pages.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, index) => ChoiceChip(
+                  label: Text(
+                      'Page ${index + 1}${placements.any((item) => item.pageIndex == index) ? ' • signée' : ''}'),
+                  selected: pageIndex == index,
+                  onSelected: (_) => _selectPage(index),
+                ),
+              ),
+            ),
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Stack(alignment: Alignment.topRight, children: [
+                  Positioned.fill(
+                    child: GestureDetector(
+                      key: const Key('signature-document-zoom-surface'),
+                      onDoubleTapDown: (details) => _doubleTapDetails = details,
+                      onDoubleTap: _togglePageZoom,
+                      child: InteractiveViewer(
+                        key: const Key('signature-document-interactive-viewer'),
+                        transformationController: _pageTransformation,
+                        minScale: SignatureViewportTransform.minimumZoom,
+                        maxScale: SignatureViewportTransform.maximumZoom,
+                        panEnabled: true,
+                        scaleEnabled: true,
+                        boundaryMargin: const EdgeInsets.all(24),
+                        clipBehavior: Clip.hardEdge,
+                        child: AspectRatio(
+                          aspectRatio: pageAspect,
+                          child: LayoutBuilder(builder: (context, constraints) {
+                            return Stack(
+                              key: const Key('signature-page-canvas'),
+                              fit: StackFit.expand,
+                              children: [
+                                Image.memory(widget.pages[pageIndex],
+                                    fit: BoxFit.fill),
+                                if (placement != null)
+                                  Positioned(
+                                    left: placement.x * constraints.maxWidth,
+                                    top: placement.y * constraints.maxHeight,
+                                    width:
+                                        placement.width * constraints.maxWidth,
+                                    height: placement.height *
+                                        constraints.maxHeight,
+                                    child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Positioned.fill(
+                                            child: GestureDetector(
+                                              key: const Key(
+                                                  'signature-overlay'),
+                                              behavior: HitTestBehavior.opaque,
+                                              onPanStart: (details) {
+                                                _gestureStart = placement;
+                                                _focalStart =
+                                                    details.globalPosition;
+                                              },
+                                              onPanUpdate: (details) {
+                                                final start = _gestureStart;
+                                                if (start == null) return;
+                                                _replaceCurrent(start.transform(
+                                                  deltaX:
+                                                      SignatureViewportTransform
+                                                          .screenDeltaToNormalized(
+                                                    details.globalPosition.dx -
+                                                        _focalStart.dx,
+                                                    unscaledPageExtent:
+                                                        constraints.maxWidth,
+                                                    zoom: _pageZoom,
+                                                  ),
+                                                  deltaY:
+                                                      SignatureViewportTransform
+                                                          .screenDeltaToNormalized(
+                                                    details.globalPosition.dy -
+                                                        _focalStart.dy,
+                                                    unscaledPageExtent:
+                                                        constraints.maxHeight,
+                                                    zoom: _pageZoom,
+                                                  ),
+                                                  scale: 1,
+                                                  pageAspectRatio: pageAspect,
+                                                  signatureAspectRatio:
+                                                      signatureAspectRatio,
+                                                ));
+                                              },
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                    border: Border.all(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary,
+                                                        width: 1.5)),
+                                                child: Image.memory(
+                                                    widget.signaturePng,
+                                                    fit: BoxFit.contain),
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            right: -2,
+                                            bottom: -2,
+                                            child: GestureDetector(
+                                              key: const Key(
+                                                  'signature-resize-handle'),
+                                              behavior: HitTestBehavior.opaque,
+                                              onPanStart: (_) {
+                                                _resizeHandleStart = placement;
+                                                _resizeHandleDelta = 0;
+                                              },
+                                              onPanUpdate: (details) {
+                                                final start =
+                                                    _resizeHandleStart;
+                                                if (start == null) return;
+                                                _resizeHandleDelta +=
+                                                    (SignatureViewportTransform
+                                                                .screenDeltaToNormalized(
+                                                              details.delta.dx,
+                                                              unscaledPageExtent:
+                                                                  constraints
+                                                                      .maxWidth,
+                                                              zoom: _pageZoom,
+                                                            ) +
+                                                            SignatureViewportTransform
+                                                                    .screenDeltaToNormalized(
+                                                                  details
+                                                                      .delta.dy,
+                                                                  unscaledPageExtent:
+                                                                      constraints
+                                                                          .maxHeight,
+                                                                  zoom:
+                                                                      _pageZoom,
+                                                                ) *
+                                                                signatureAspectRatio /
+                                                                pageAspect) /
+                                                        2;
+                                                _replaceCurrent(
+                                                  start.resizeFromBottomRight(
+                                                    deltaWidth:
+                                                        _resizeHandleDelta,
+                                                    pageAspectRatio: pageAspect,
+                                                    signatureAspectRatio:
+                                                        signatureAspectRatio,
+                                                  ),
+                                                );
+                                              },
+                                              child: Container(
+                                                width: 32,
+                                                height: 32,
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                      color: Colors.white,
+                                                      width: 2),
+                                                  boxShadow: const [
+                                                    BoxShadow(
+                                                        color:
+                                                            Color(0x44000000),
+                                                        blurRadius: 4)
+                                                  ],
+                                                ),
+                                                child: const Icon(
+                                                  Icons.open_in_full_rounded,
+                                                  color: Colors.white,
+                                                  size: 17,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ]),
+                                  ),
+                              ],
+                            );
+                          }),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Material(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surface
+                          .withValues(alpha: .92),
+                      borderRadius: BorderRadius.circular(18),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: Text('${(_pageZoom * 100).round()} %',
+                              key: const Key('signature-zoom-level'),
+                              style: const TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.w800)),
+                        ),
+                        IconButton(
+                          key: const Key('signature-reset-zoom'),
+                          tooltip: 'Réinitialiser le zoom',
+                          onPressed: _pageZoom > 1.01 ? _resetPageZoom : null,
+                          icon: const Icon(Icons.center_focus_strong_rounded),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+            child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (placement == null)
+                    OutlinedButton.icon(
+                      key: const Key('signature-add-current-page'),
+                      onPressed: () => _addCurrent(pageAspect),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Ajouter sur cette page'),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      key: const Key('signature-delete-current-page'),
+                      onPressed: () => setState(() => placements
+                          .removeWhere((item) => item.pageIndex == pageIndex)),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Supprimer'),
+                    ),
+                  FilledButton.icon(
+                    key: const Key('signature-editor-validate'),
+                    onPressed: placements.isEmpty
+                        ? null
+                        : () => Navigator.pop(
+                            context,
+                            List<NormalizedSignaturePlacement>.unmodifiable(
+                                placements)),
+                    icon: const Icon(Icons.check),
+                    label: const Text('Valider'),
+                  ),
+                ]),
+          ),
+        ]),
+      ),
+    );
   }
 }
 
@@ -5089,12 +6476,9 @@ const String geminiUnavailableMessage =
 
 /// Transport IA commun.
 ///
-/// En production, [GEMINI_PROXY_URL] doit désigner un backend HTTPS qui garde
-/// la clé Google côté serveur. [GEMINI_API_KEY] reste accepté uniquement pour
-/// les builds de bêta interne : une dart-define est compilée dans le binaire et
-/// ne constitue donc pas un secret.
+/// [GEMINI_PROXY_URL] doit désigner un backend HTTPS qui garde la clé Google
+/// exclusivement côté serveur. Aucune clé Gemini n'est acceptée dans le client.
 class GeminiTransport {
-  static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
   static const String _proxyUrl = String.fromEnvironment('GEMINI_PROXY_URL');
   static const String _model = String.fromEnvironment(
     'GEMINI_MODEL',
@@ -5118,13 +6502,9 @@ class GeminiTransport {
 
   static String get _effectiveProxyUrl => testProxyUrl ?? _proxyUrl;
   static bool get usesProxy => _effectiveProxyUrl.trim().isNotEmpty;
-  static bool get usesEmbeddedKey => !usesProxy && _apiKey.trim().isNotEmpty;
-  static bool get isConfigured => usesProxy || usesEmbeddedKey;
-  static String get configurationMode => usesProxy
-      ? 'proxy'
-      : usesEmbeddedKey
-          ? 'direct-beta'
-          : 'disabled';
+  static bool get usesEmbeddedKey => false;
+  static bool get isConfigured => usesProxy;
+  static String get configurationMode => usesProxy ? 'proxy' : 'disabled';
 
   static Future<Map<String, dynamic>> request(
     String prompt,
@@ -5135,42 +6515,24 @@ class GeminiTransport {
     final Uri uri;
     final Map<String, String> headers = {'Content-Type': 'application/json'};
     final Map<String, Object> body;
-    if (usesProxy) {
-      uri = Uri.parse(_effectiveProxyUrl.trim());
-      if (uri.scheme != 'https' &&
-          !(kDebugMode &&
-              (uri.host == 'localhost' || uri.host == '127.0.0.1'))) {
-        throw const GeminiConfigurationException();
-      }
-      final token = _supabaseReady
-          ? Supabase.instance.client.auth.currentSession?.accessToken
-          : null;
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-      body = {
-        'model': _model,
-        'prompt': prompt,
-        'generationConfig': generationConfig,
-      };
-    } else {
-      uri = Uri.https(
-        'generativelanguage.googleapis.com',
-        '/v1beta/models/$_model:generateContent',
-        {'key': _apiKey},
-      );
-      body = {
-        'contents': [
-          {
-            'role': 'user',
-            'parts': [
-              {'text': prompt}
-            ]
-          }
-        ],
-        'generationConfig': generationConfig,
-      };
+    uri = Uri.parse(_effectiveProxyUrl.trim());
+    if (uri.scheme != 'https' &&
+        !(kDebugMode && (uri.host == 'localhost' || uri.host == '127.0.0.1'))) {
+      throw const GeminiConfigurationException();
     }
+    final token = _supabaseReady
+        ? Supabase.instance.client.auth.currentSession?.accessToken
+        : null;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    } else if (testPost == null) {
+      throw const GeminiConfigurationException();
+    }
+    body = {
+      'model': _model,
+      'prompt': prompt,
+      'generationConfig': generationConfig,
+    };
 
     try {
       final post = testPost ?? http.post;
@@ -11013,6 +12375,16 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       setState(() => _syncedProcedureIds.add(item.id));
       _failedProcedureIds.remove(item.id);
 
+      await appNotificationStore.add(AppNotification(
+        id: 'procedure-synced-${item.id}',
+        type: AppNotificationType.synchronized,
+        message: 'Synchronisation terminée : ${item.title}.',
+        createdAt: DateTime.now(),
+        targetType: NotificationTargetType.procedure,
+        targetId: item.id,
+      ));
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -11026,6 +12398,16 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       if (!mounted) return;
 
       setState(() => _failedProcedureIds.add(item.id));
+
+      await appNotificationStore.add(AppNotification(
+        id: 'procedure-sync-error-${item.id}',
+        type: AppNotificationType.synchronizationError,
+        message: 'La synchronisation de ${item.title} a échoué.',
+        createdAt: DateTime.now(),
+        targetType: NotificationTargetType.procedure,
+        targetId: item.id,
+      ));
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(cloudOperationMessage(error))),
@@ -11576,9 +12958,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           )
           .timeout(const Duration(seconds: 30));
       if (mounted) setState(() => _syncedDocumentIds.add(doc.id));
+      await appNotificationStore.add(AppNotification(
+        id: 'document-synced-${doc.id}',
+        type: AppNotificationType.synchronized,
+        message: 'Synchronisation terminée : ${doc.title}.',
+        createdAt: DateTime.now(),
+        targetType: NotificationTargetType.document,
+        targetId: doc.id,
+      ));
     } catch (error) {
       if (mounted) {
         setState(() => _failedDocumentIds.add(doc.id));
+        await appNotificationStore.add(AppNotification(
+          id: 'document-sync-error-${doc.id}',
+          type: AppNotificationType.synchronizationError,
+          message: 'La synchronisation de ${doc.title} a échoué.',
+          createdAt: DateTime.now(),
+          targetType: NotificationTargetType.document,
+          targetId: doc.id,
+        ));
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(cloudOperationMessage(error))),
         );
@@ -12264,6 +13663,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       fields.map((key, value) => MapEntry(key, value.text)),
     );
 
+    String? remoteWarning;
+    final user = _currentSupabaseUser;
+    if (user != null) {
+      try {
+        await _upsertRemoteProfile(widget.settings, user);
+      } catch (error) {
+        remoteWarning =
+            'Profil conservé sur cet appareil. ${cloudOperationMessage(error)}';
+      }
+    }
+
     try {
       await _authService?.updateProfile({
         'first_name': fields['firstName']!.text.trim(),
@@ -12281,7 +13691,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profil enregistré')),
+      SnackBar(content: Text(remoteWarning ?? 'Profil enregistré')),
     );
   }
 
@@ -12350,6 +13760,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _authBusy = true);
     try {
       await service.signOut();
+      await _googleAuthService?.signOutProvider();
     } on AuthOperationException catch (error) {
       if (mounted) _showAuthMessage(error.displayMessage);
       return;
@@ -12451,35 +13862,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       throw const FileSystemException(
           'La signature dépasse la taille maximale de 5 Mo.');
     }
-    await widget.settings.saveSignatureBytes(bytes);
-    final normalizedBytes =
-        await File(widget.settings.signaturePath).readAsBytes();
-    final user = _currentSupabaseUser;
-    if (_supabaseReady && user != null) {
-      try {
-        await Supabase.instance.client.storage
-            .from('admin-documents')
-            .uploadBinary(
-              '${user.id}/profile/signature.png',
-              normalizedBytes,
-              fileOptions: const FileOptions(
-                upsert: true,
-                contentType: 'image/png',
-              ),
-            )
-            .timeout(const Duration(seconds: 20));
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Signature enregistrée sur ce téléphone. '
-                '${cloudOperationMessage(error)}',
-              ),
-            ),
-          );
-        }
-      }
+    final result = await widget.settings.saveSignatureBytes(bytes);
+    if (result.remoteError != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Signature enregistrée sur ce téléphone. '
+            '${cloudOperationMessage(result.remoteError!)}',
+          ),
+        ),
+      );
     }
     if (mounted) setState(() {});
   }
@@ -12530,17 +13922,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _removeSignature() async {
-    final user = _currentSupabaseUser;
-    await widget.settings.removeSignature();
-    if (_supabaseReady && user != null) {
-      try {
-        await Supabase.instance.client.storage
-            .from('admin-documents')
-            .remove(['${user.id}/profile/signature.png']).timeout(
-                const Duration(seconds: 20));
-      } catch (_) {
-        // La copie locale est supprimée même si le réseau est indisponible.
-      }
+    final result = await widget.settings.removeSignature();
+    if (result.remoteError != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Signature supprimée de ce téléphone. '
+            'La suppression cloud sera à réessayer avec une connexion active.',
+          ),
+        ),
+      );
     }
     if (mounted) setState(() {});
   }

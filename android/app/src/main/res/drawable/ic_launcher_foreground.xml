@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:left="32dp"
-        android:top="32dp"
-        android:right="32dp"
-        android:bottom="32dp"
-        android:drawable="@drawable/adminfacile_mark" />
+        android:left="6dp"
+        android:top="6dp"
+        android:right="6dp"
+        android:bottom="6dp"
+        android:drawable="@drawable/adminfacile_brand_icon" />
 </layer-list>

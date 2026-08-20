@@ -7,6 +7,8 @@ import 'dart:ui' as ui;
 import 'package:admin_facile/main.dart';
 import 'package:admin_facile/document_scanner_service.dart';
 import 'package:admin_facile/professional_auth_service.dart';
+import 'package:admin_facile/google_auth_service.dart';
+import 'package:admin_facile/notification_store.dart';
 import 'package:admin_facile/letter_signature_service.dart';
 import 'package:admin_facile/signature_pad.dart';
 import 'package:admin_facile/signature_image_service.dart';
@@ -25,6 +27,8 @@ class AuthenticatedTestSession implements AppAuthSession {
   bool get isServiceAvailable => true;
   @override
   ProfessionalAuthService? get service => null;
+  @override
+  GoogleAuthService? get googleService => null;
   @override
   Stream<bool> get changes => const Stream<bool>.empty();
 }
@@ -95,11 +99,13 @@ class MutableTestAuthSession implements AppAuthSession {
     gateway = WidgetAuthGateway(_setAuthenticated);
     gateway.signedIn = authenticated;
     authService = ProfessionalAuthService(gateway);
+    googleAuthService = FakeGoogleAuthService(_setAuthenticated);
   }
 
   final StreamController<bool> controller = StreamController<bool>.broadcast();
   late final WidgetAuthGateway gateway;
   late final ProfessionalAuthService authService;
+  late final FakeGoogleAuthService googleAuthService;
   bool _authenticated;
   final bool _available;
 
@@ -118,6 +124,35 @@ class MutableTestAuthSession implements AppAuthSession {
   bool get isServiceAvailable => _available;
   @override
   ProfessionalAuthService? get service => _available ? authService : null;
+  @override
+  GoogleAuthService? get googleService => _available ? googleAuthService : null;
+}
+
+class FakeGoogleAuthService implements GoogleAuthService {
+  FakeGoogleAuthService(this.onAuthenticated);
+
+  final void Function(bool) onAuthenticated;
+  bool configured = true;
+  int launches = 0;
+  Object? nextError;
+  Completer<void>? pending;
+
+  @override
+  bool get isConfigured => configured;
+
+  @override
+  Future<void> signIn() async {
+    launches++;
+    final wait = pending;
+    if (wait != null) await wait.future;
+    final error = nextError;
+    nextError = null;
+    if (error != null) throw error;
+    onAuthenticated(true);
+  }
+
+  @override
+  Future<void> signOutProvider() async {}
 }
 
 class FailingDocumentScanner implements DocumentScannerService {
@@ -153,9 +188,94 @@ void main() {
       addTearDown(session.close);
       await pumpApp(tester, session);
       expect(find.byKey(const Key('auth-welcome-screen')), findsOneWidget);
-      expect(find.text('Simplifiez vos démarches administratives'),
-          findsOneWidget);
+      expect(find.byKey(const Key('auth-admin-facile-logo')), findsOneWidget);
+      final logo = tester.widget<Image>(
+        find.byKey(const Key('admin-facile-logo-image')),
+      );
+      expect(
+        (logo.image as AssetImage).assetName,
+        'assets/branding/admin_facile_logo.png',
+      );
+      expect(logo.fit, BoxFit.contain);
       expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+      expect(find.byKey(const Key('auth-google')), findsOneWidget);
+      expect(find.byKey(const Key('auth-administrative-background')),
+          findsOneWidget);
+      expect(
+        tester
+            .widget<IgnorePointer>(
+              find.byKey(const Key('auth-administrative-background')),
+            )
+            .ignoring,
+        isTrue,
+      );
+    });
+
+    testWidgets('succès Google traverse AuthGate vers le dashboard',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pumpAndSettle();
+      expect(session.googleAuthService.launches, 1);
+      expect(find.byKey(const Key('dashboard-v17')), findsOneWidget);
+    });
+
+    testWidgets('annulation Google reste sur l’accueil avec message neutre',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      session.googleAuthService.nextError = const GoogleAuthException(
+        'Connexion Google annulée.',
+        code: 'canceled',
+      );
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pumpAndSettle();
+      expect(find.text('Connexion Google annulée.'), findsOneWidget);
+      expect(find.byKey(const Key('dashboard-v17')), findsNothing);
+    });
+
+    testWidgets('erreur réseau Google est compréhensible', (tester) async {
+      final session = MutableTestAuthSession();
+      session.googleAuthService.nextError = const GoogleAuthException(
+        'Vérifiez votre connexion Internet.',
+        code: 'network_unavailable',
+      );
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pumpAndSettle();
+      expect(find.text('Vérifiez votre connexion Internet.'), findsOneWidget);
+    });
+
+    testWidgets('Google ne peut pas être lancé deux fois', (tester) async {
+      final session = MutableTestAuthSession();
+      session.googleAuthService.pending = Completer<void>();
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pump();
+      expect(session.googleAuthService.launches, 1);
+      session.googleAuthService.pending!.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('une erreur Google brute ne divulgue aucune donnée sensible',
+        (tester) async {
+      final session = MutableTestAuthSession();
+      session.googleAuthService.nextError =
+          StateError('access_token=secret-value');
+      addTearDown(session.close);
+      await pumpApp(tester, session);
+      await tester.tap(find.byKey(const Key('auth-google')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('secret-value'), findsNothing);
+      expect(find.text('La connexion Google a échoué. Réessayez.'),
+          findsOneWidget);
     });
 
     testWidgets('une session restaurée ouvre directement le dashboard',
@@ -425,6 +545,11 @@ void main() {
     expect(find.byKey(const Key('dashboard-v17')), findsOneWidget);
     expect(find.text('Simplifiez vos démarches au quotidien'), findsOneWidget);
     expect(find.byKey(const Key('create-letter-v17')), findsOneWidget);
+    await tester.drag(
+      find.byType(Scrollable).first,
+      const Offset(0, -320),
+    );
+    await tester.pumpAndSettle();
     for (final label in [
       'Assistant\nadministratif',
       'Mes\ndémarches',
@@ -433,6 +558,55 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget);
     }
+  });
+
+  testWidgets('la carte d’accueil utilise la lettre bleue et le scan orange',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final settings = AppSettings();
+    final documents = DocumentStore();
+    final procedures = ProcedureStore();
+    await settings.load();
+    await documents.load();
+    await procedures.load();
+    await tester.pumpWidget(AdminFacileApp(
+      settings: settings,
+      documentStore: documents,
+      procedureStore: procedures,
+      authSession: const AuthenticatedTestSession(),
+    ));
+    await tester.pumpAndSettle();
+
+    final scan = tester.widget<FilledButton>(
+      find.byKey(const Key('home-scan-document-button')),
+    );
+    final background = scan.style?.backgroundColor?.resolve(<WidgetState>{});
+    expect(background, const Color(0xFFFFA51F));
+    expect(find.byKey(const Key('home-letter-illustration')), findsOneWidget);
+    expect(find.byKey(const Key('home-large-feather')), findsOneWidget);
+    final illustration = tester.widget<Image>(
+      find.byKey(const Key('home-large-feather')),
+    );
+    expect(
+      (illustration.image as AssetImage).assetName,
+      'assets/images/hero_plume_document.jpg',
+    );
+    expect(illustration.fit, BoxFit.contain);
+    expect(illustration.alignment, Alignment.center);
+    expect(find.byKey(const Key('home-hero-horizontal-fade')), findsOneWidget);
+    expect(find.byKey(const Key('home-hero-vertical-fade')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('home-letter-illustration'))).height,
+      377,
+    );
+    final photoSize =
+        tester.getSize(find.byKey(const Key('home-hero-photo-frame')));
+    expect(photoSize.height, 377);
+    expect(photoSize.width, closeTo(377 * 912 / 1156, .01));
+    expect(find.byIcon(Icons.edit_rounded), findsNothing);
+    expect(find.text('Créer une lettre'), findsWidgets);
+    expect(find.text('Scanner un document'), findsWidgets);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Le tableau de bord salue avec le prénom', (tester) async {
@@ -621,6 +795,11 @@ void main() {
         procedureStore: procedures,
         authSession: const AuthenticatedTestSession()));
     await tester.pumpAndSettle();
+    await tester.drag(
+      find.byType(Scrollable).first,
+      const Offset(0, -320),
+    );
+    await tester.pumpAndSettle();
     for (final label in [
       'Assistant\nadministratif',
       'Mes\ndémarches',
@@ -713,9 +892,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
 
     for (final size in [
-      const Size(320, 568),
-      const Size(344, 700),
-      const Size(800, 400),
+      const Size(360, 800),
+      const Size(390, 844),
+      const Size(412, 915),
+      const Size(800, 900),
       const Size(1024, 768),
     ]) {
       tester.view.physicalSize = size;
@@ -739,6 +919,82 @@ void main() {
                   openGlobalSearch: () {},
                   openProfile: () {}))));
       await tester.pump();
+      final heroRect = tester.getRect(find.byKey(const Key('home-hero-card')));
+      final titleRect =
+          tester.getRect(find.text('Simplifiez vos démarches au quotidien'));
+      final descriptionRect = tester.getRect(find.text(
+          'Générez, envoyez et suivez vos courriers administratifs simplement.'));
+      final createRect =
+          tester.getRect(find.byKey(const Key('create-letter-v17')));
+      final scanRect =
+          tester.getRect(find.byKey(const Key('home-scan-document-button')));
+      final illustrationRect =
+          tester.getRect(find.byKey(const Key('home-letter-illustration')));
+
+      for (final entry in <String, Rect>{
+        'titre': titleRect,
+        'description': descriptionRect,
+        'bouton Créer': createRect,
+        'bouton Scanner': scanRect,
+        'illustration': illustrationRect,
+      }.entries) {
+        expect(
+          heroRect.contains(entry.value.topLeft) &&
+              heroRect.contains(entry.value.bottomRight),
+          isTrue,
+          reason: '${entry.key} doit rester dans la hero card à $size',
+        );
+      }
+
+      for (final contentRect in [
+        titleRect,
+        descriptionRect,
+        createRect,
+        scanRect,
+      ]) {
+        expect(
+          contentRect.overlaps(illustrationRect),
+          isFalse,
+          reason: 'Le contenu ne doit pas être recouvert à $size',
+        );
+      }
+
+      final createButton = tester
+          .widget<FilledButton>(find.byKey(const Key('create-letter-v17')));
+      final scanButton = tester.widget<FilledButton>(
+          find.byKey(const Key('home-scan-document-button')));
+      expect(createButton.onPressed, isNotNull);
+      expect(scanButton.onPressed, isNotNull);
+
+      final illustrationHeight = tester
+          .getSize(find.byKey(const Key('home-letter-illustration')))
+          .height;
+      final phoneLayout = heroRect.width < 600;
+      final expectedHeight = phoneLayout
+          ? heroRect.width < 390
+              ? 250.0
+              : 270.0
+          : 377.0;
+      expect(
+        illustrationHeight,
+        expectedHeight,
+        reason: 'Hauteur illustration pour $size',
+      );
+      final photoSize =
+          tester.getSize(find.byKey(const Key('home-hero-photo-frame')));
+      expect(photoSize.height, expectedHeight);
+      expect(
+        photoSize.width,
+        closeTo(expectedHeight * 912 / 1156, .01),
+        reason: 'Largeur proportionnelle de la photo pour $size',
+      );
+      if (phoneLayout) {
+        expect(
+          illustrationRect.top,
+          greaterThan(scanRect.bottom),
+          reason: 'L’illustration doit suivre les actions à $size',
+        );
+      }
       expect(tester.takeException(), isNull, reason: 'Taille $size');
     }
   });
@@ -790,10 +1046,13 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final directory = await Directory.systemTemp.createTemp('adminfacile_v17_');
     addTearDown(() => directory.delete(recursive: true));
-    final settings = AppSettings();
+    final settings = AppSettings(
+      signatureDirectoryProvider: () async => directory,
+    );
     await settings.load();
+    await settings.activateProfileForUser('signature-test-user');
     final png = await File('assets/adminfacile_mark.png').readAsBytes();
-    await settings.saveSignatureBytes(png, directory: directory);
+    await settings.saveSignatureBytes(png);
     expect(settings.hasSignature, isTrue);
     await settings.setAutoInsertSignature(true);
     expect(settings.autoInsertSignature, isTrue);
@@ -805,11 +1064,13 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final directory =
         await Directory.systemTemp.createTemp('adminfacile_preview_');
-    final settings = AppSettings();
+    final settings = AppSettings(
+      signatureDirectoryProvider: () async => directory,
+    );
     await settings.load();
+    await settings.activateProfileForUser('preview-test-user');
     await settings.saveSignatureBytes(
       await File('assets/adminfacile_mark.png').readAsBytes(),
-      directory: directory,
     );
     await settings.setAutoInsertSignature(true);
     expect(shouldInsertSignature(settings), isTrue);
@@ -1761,13 +2022,25 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'signaturePathV17': legacy.path,
     });
-    final settings = AppSettings();
+    final settings = AppSettings(
+      signatureDirectoryProvider: () async => directory,
+    );
     await settings.load();
+    await settings.activateProfileForUser('legacy-test-user');
     expect(settings.hasSignature, isTrue);
-    expect(settings.signaturePath, endsWith('adminfacile_signature_v1735.png'));
+    expect(
+      settings.signaturePath,
+      endsWith(
+        '${Platform.pathSeparator}signatures${Platform.pathSeparator}'
+        'legacy-test-user${Platform.pathSeparator}signature.png',
+      ),
+    );
     expect(await legacy.exists(), isTrue);
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('signatureTransparentPngV1735'), isTrue);
+    expect(
+      prefs.getBool('signature.legacy-test-user.transparentPng'),
+      isTrue,
+    );
   });
 
   testWidgets(
@@ -1933,7 +2206,8 @@ void main() {
     expect(service, contains('AndroidMlKitDocumentScannerService'));
     expect(source, contains('widget.scannerService.scan(pageLimit: 10)'));
     expect(source, contains('_extractTextFromImages(renderedPaths)'));
-    expect(source, contains('ScannerProcessingService.buildA4Pdf(pdfPages)'));
+    expect(source, contains('ScannerProcessingService.preparePdf('));
+    expect(source, contains('nativePdfPath: result.pdfPath'));
     expect(android, contains('GmsDocumentScanning.getClient(options)'));
     expect(android, contains('FlutterFragmentActivity'));
     expect(android, contains('registerForActivityResult'));
@@ -1952,6 +2226,33 @@ void main() {
         File('android/app/src/main/kotlin/fr/adminfacile/app/ProfessionalScannerActivity.kt')
             .existsSync(),
         isFalse);
+  });
+
+  test('la signature de document reste dérivée du PDF ML Kit et des JPEG OCR',
+      () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final service =
+        File('lib/document_signature_service.dart').readAsStringSync();
+    expect(source, contains("key: const Key('scanner-add-signature')"));
+    expect(source, contains('_unsignedPdfPath ?? pdfPath'));
+    expect(source, contains('_renderedScanImagePaths.isNotEmpty'));
+    expect(source, contains('DocumentSignatureService.createSignedCopy'));
+    expect(source, contains("'signature-resize-handle'"));
+    expect(source, contains("'signature-document-interactive-viewer'"));
+    expect(source, contains("key: const Key('signature-reset-zoom')"));
+    expect(
+        source, contains('minScale: SignatureViewportTransform.minimumZoom'));
+    expect(
+        source, contains('maxScale: SignatureViewportTransform.maximumZoom'));
+    expect(source, contains('panEnabled: true'));
+    expect(source, contains('scaleEnabled: true'));
+    expect(source, contains('void _selectPage(int index)'));
+    expect(source, contains('_resetPageZoom();'));
+    expect(source, isNot(contains('details.pointerCount > 1')));
+    expect(service, contains('document_signe_'));
+    expect(service, isNot(contains('.copySync(')));
+    expect(source, contains('_extractTextFromImages(renderedPaths)'));
+    expect(source, contains('nativePdfPath: result.pdfPath'));
   });
 
   test('V19.0 garde le document précédent si ML Kit échoue', () {
@@ -1978,12 +2279,18 @@ void main() {
 
   test('V20.0 ne bloque pas le démarrage sur la synchronisation cloud', () {
     final source = File('lib/main.dart').readAsStringSync();
+    final signatureSource =
+        File('lib/profile_signature_service.dart').readAsStringSync();
     final runAppPosition = source.indexOf('runApp(');
-    final syncPosition = source.indexOf('unawaited(_syncMigratedSignature');
+    final syncPosition = source.indexOf('unawaited(_synchronizeProfileForUser');
 
     expect(runAppPosition, greaterThan(0));
     expect(syncPosition, greaterThan(runAppPosition));
-    expect(source, contains('.timeout(const Duration(seconds: 20))'));
+    expect(source, contains('.timeout(const Duration(seconds: 15))'));
+    expect(
+      signatureSource,
+      contains('.timeout(const Duration(seconds: 20))'),
+    );
   });
 
   test('V20.0 traduit les erreurs cloud sans exposer de détail technique', () {
@@ -2029,20 +2336,37 @@ void main() {
     expect(manifest, isNot(contains('POST_NOTIFICATIONS')));
   });
 
-  test('V20.1 utilise la marque AdminFacile pour icône et splash', () {
+  test('V20.4.27 utilise la nouvelle marque pour icône et splash', () {
+    final pubspec = File('pubspec.yaml').readAsStringSync();
     final adaptive = File(
       'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+    ).readAsStringSync();
+    final foreground = File(
+      'android/app/src/main/res/drawable/ic_launcher_foreground.xml',
     ).readAsStringSync();
     final android12 = File(
       'android/app/src/main/res/values-v31/styles.xml',
     ).readAsStringSync();
+    final colors = File(
+      'android/app/src/main/res/values/colors.xml',
+    ).readAsStringSync();
 
     expect(adaptive, contains('@drawable/ic_launcher_foreground'));
+    expect(
+      pubspec,
+      contains('assets/branding/admin_facile_icon.png'),
+    );
+    expect(
+      pubspec,
+      contains('assets/branding/admin_facile_logo.png'),
+    );
     expect(adaptive, contains('@color/adminfacile_icon_background'));
+    expect(foreground, contains('@drawable/adminfacile_brand_icon'));
     expect(android12, contains('android:windowSplashScreenAnimatedIcon'));
     expect(android12, contains('@drawable/adminfacile_splash'));
+    expect(colors, contains('#010E28'));
     expect(
-      File('android/app/src/main/res/drawable/adminfacile_mark.png')
+      File('android/app/src/main/res/drawable/adminfacile_brand_icon.png')
           .existsSync(),
       isTrue,
     );
@@ -2051,6 +2375,52 @@ void main() {
           .existsSync(),
       isTrue,
     );
+
+    final expectedSizes = <String, int>{
+      'mdpi': 48,
+      'hdpi': 72,
+      'xhdpi': 96,
+      'xxhdpi': 144,
+      'xxxhdpi': 192,
+    };
+    for (final entry in expectedSizes.entries) {
+      final launcher = img.decodePng(
+        File(
+          'android/app/src/main/res/mipmap-${entry.key}/ic_launcher.png',
+        ).readAsBytesSync(),
+      );
+      expect(launcher, isNotNull, reason: entry.key);
+      expect(launcher!.width, entry.value, reason: entry.key);
+      expect(launcher.height, entry.value, reason: entry.key);
+    }
+
+    final splash = img.decodePng(
+      File('android/app/src/main/res/drawable/adminfacile_splash.png')
+          .readAsBytesSync(),
+    );
+    expect(splash, isNotNull);
+    expect(splash!.width, 288);
+    expect(splash.height, 288);
+  });
+
+  testWidgets('V20.4.27 affiche le nouveau symbole dans l’interface',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: AdminFacileMark(size: 96)),
+      ),
+    );
+    await tester.pump();
+
+    final symbol = tester.widget<Image>(
+      find.byKey(const Key('admin-facile-icon-image')),
+    );
+    expect(
+      (symbol.image as AssetImage).assetName,
+      'assets/branding/admin_facile_icon.png',
+    );
+    expect(symbol.fit, BoxFit.contain);
+    expect(tester.getSize(find.byType(AdminFacileMark)), const Size(96, 96));
   });
 
   test('V20.2 utilise le package Android définitif', () {
@@ -2085,5 +2455,146 @@ void main() {
       scannerService,
       contains("MethodChannel('adminfacile/mlkit_document_scanner')"),
     );
+  });
+
+  group('V20.4 centre de notifications', () {
+    Future<
+        ({
+          AppSettings settings,
+          DocumentStore documents,
+          ProcedureStore procedures,
+          NotificationStore notifications,
+        })> fixture() async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final settings = AppSettings();
+      final notifications = NotificationStore();
+      final documents = DocumentStore(notificationStore: notifications);
+      final procedures = ProcedureStore(notificationStore: notifications);
+      await Future.wait([
+        settings.load(),
+        notifications.load(),
+        documents.load(),
+        procedures.load(),
+      ]);
+      return (
+        settings: settings,
+        documents: documents,
+        procedures: procedures,
+        notifications: notifications,
+      );
+    }
+
+    Future<void> pumpShell(
+        WidgetTester tester,
+        ({
+          AppSettings settings,
+          DocumentStore documents,
+          ProcedureStore procedures,
+          NotificationStore notifications,
+        }) data) async {
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(
+          settings: data.settings,
+          documentStore: data.documents,
+          procedureStore: data.procedures,
+          notificationStore: data.notifications,
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Recherche et Notifications ouvrent deux pages distinctes',
+        (tester) async {
+      final data = await fixture();
+      await pumpShell(tester, data);
+
+      await tester.tap(find.byKey(const Key('dashboard-global-search')));
+      await tester.pumpAndSettle();
+      expect(find.text('Recherche globale'), findsOneWidget);
+      expect(find.byKey(const Key('notifications-screen')), findsNothing);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('dashboard-notifications')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('notifications-screen')), findsOneWidget);
+      expect(find.text('Notifications'), findsOneWidget);
+      expect(find.text('Recherche globale'), findsNothing);
+      expect(find.text('Aucune notification pour le moment'), findsOneWidget);
+    });
+
+    testWidgets('notification réelle non lue affiche badge puis peut être lue',
+        (tester) async {
+      final data = await fixture();
+      await data.documents.add(SavedDocument(
+        id: 'caf-document',
+        title: 'Attestation CAF',
+        category: 'CAF',
+        organisation: 'CAF',
+        createdAt: DateTime(2026, 8, 11, 9, 30),
+        extractedText: 'Attestation enregistrée',
+      ));
+      await pumpShell(tester, data);
+
+      expect(find.byKey(const Key('dashboard-notification-badge')),
+          findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('dashboard-notifications')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('notification-unread-indicator')),
+          findsOneWidget);
+
+      await tester.tap(
+          find.byKey(const Key('notification-document-added-caf-document')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('notification-document-target')),
+          findsOneWidget);
+      expect(find.text('Attestation CAF'), findsOneWidget);
+      expect(data.notifications.unreadCount, 0);
+    });
+
+    testWidgets('tout marquer comme lu retire les indicateurs et le badge',
+        (tester) async {
+      final data = await fixture();
+      await data.notifications.add(AppNotification(
+        id: 'account-real-event',
+        type: AppNotificationType.account,
+        message: 'Informations de compte mises à jour.',
+        createdAt: DateTime(2026, 8, 11, 10),
+      ));
+      await data.procedures.add(AdministrativeProcedure(
+        id: 'caf-procedure',
+        title: 'Dossier CAF',
+        organisation: 'CAF',
+        category: 'Aides',
+        letter: 'Compléter le dossier.',
+        createdAt: DateTime(2026, 8, 11, 10, 5),
+        updatedAt: DateTime(2026, 8, 11, 10, 5),
+      ));
+      await pumpShell(tester, data);
+      expect(find.text('2'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('dashboard-notifications')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('notifications-mark-all-read')));
+      await tester.pumpAndSettle();
+      expect(data.notifications.unreadCount, 0);
+      expect(
+          find.byKey(const Key('notification-unread-indicator')), findsNothing);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(
+          find.byKey(const Key('dashboard-notification-badge')), findsNothing);
+      await tester.tap(find.byKey(const Key('dashboard-notifications')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+          find.byKey(const Key('notification-procedure-added-caf-procedure')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('notification-procedure-target')),
+          findsOneWidget);
+      expect(find.text('Dossier CAF'), findsOneWidget);
+    });
   });
 }

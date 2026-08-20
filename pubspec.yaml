@@ -1,7 +1,7 @@
 name: admin_facile
 description: AdminFacile, assistant administratif personnel.
 publish_to: "none"
-version: 20.3.1+84
+version: 20.4.28+113
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -23,6 +23,7 @@ dependencies:
   http: ^1.6.0
   image: ^4.8.0
   supabase_flutter: ^2.16.0
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -32,8 +33,12 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/branding/admin_facile_icon.png
+    - assets/branding/admin_facile_logo.png
     - assets/adminfacile_logo.png
     - assets/adminfacile_mark.png
+    - assets/google_g_logo.png
+    - assets/images/hero_plume_document.jpg
     - assets/letters/library.json
     - assets/fonts/Roboto-Regular.ttf
     - assets/fonts/Roboto-Bold.ttf
