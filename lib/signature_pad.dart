@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import 'l10n/ui_localization.dart';
+
 class SignaturePadScreen extends StatefulWidget {
   const SignaturePadScreen({super.key});
 
@@ -20,7 +22,8 @@ class _SignaturePadScreenState extends State<SignaturePadScreen> {
     if (_points.whereType<Offset>().length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Dessinez votre signature avant de l’enregistrer.')),
+            content: LocalizedText(
+                'Dessinez votre signature avant de l’enregistrer.')),
       );
       return;
     }
@@ -39,12 +42,13 @@ class _SignaturePadScreenState extends State<SignaturePadScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Dessiner ma signature')),
+        appBar: AppBar(title: const LocalizedText('Dessiner ma signature')),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(children: [
-              const Text('Signez avec votre doigt dans la zone blanche.'),
+              const LocalizedText(
+                  'Signez avec votre doigt dans la zone blanche.'),
               const SizedBox(height: 12),
               Expanded(
                 child: DecoratedBox(
@@ -81,20 +85,20 @@ class _SignaturePadScreenState extends State<SignaturePadScreen> {
               Row(children: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Annuler'),
+                  child: const LocalizedText('Annuler'),
                 ),
                 const Spacer(),
                 OutlinedButton.icon(
                   onPressed: () => setState(_points.clear),
                   icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('Effacer'),
+                  label: const LocalizedText('Effacer'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
                   key: const Key('save-signature-drawing'),
                   onPressed: _saving ? null : _save,
                   icon: const Icon(Icons.check_rounded),
-                  label: const Text('Enregistrer'),
+                  label: const LocalizedText('Enregistrer'),
                 ),
               ]),
             ]),

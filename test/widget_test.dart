@@ -1425,13 +1425,13 @@ void main() {
     for (final marker in [
       "Key('scanner-pdf-open')",
       "Key('scanner-pdf-more-menu')",
-      "Text('Ajouter à Mes documents')",
-      "Text('Transmettre')",
-      "Text('Imprimer')",
+      "'Ajouter à Mes documents'",
+      "LocalizedText('Transmettre')",
+      "LocalizedText('Imprimer')",
       "Key('scanner-advanced-analysis')",
-      "Text('Voir le texte OCR')",
-      "Text('Analyse Gemini')",
-      "Text('Corriger les informations')",
+      "LocalizedText('Voir le texte OCR')",
+      "LocalizedText('Analyse Gemini')",
+      "LocalizedText('Corriger les informations')",
     ]) {
       expect(source, contains(marker), reason: 'Action absente : $marker');
     }
@@ -1540,7 +1540,12 @@ void main() {
     final source = File('lib/main.dart').readAsStringSync();
     expect(source, isNot(contains('Icons.more_vert')));
     expect(RegExp(r'Icons\.more_horiz_rounded').allMatches(source).length, 5);
-    expect(RegExp("tooltip: 'Plus d’actions'").allMatches(source).length, 4);
+    expect(
+      RegExp("tooltip:\\s*uiText\\(context, 'Plus d’actions'\\)")
+          .allMatches(source)
+          .length,
+      4,
+    );
   });
 
   testWidgets('Les petites actions de l’accueil sont contrastées en mode clair',
@@ -2154,7 +2159,10 @@ void main() {
     expect(manifest, isNot(contains('android.permission.BLUETOOTH')));
     expect(manifest, contains('android.permission.RECORD_AUDIO'));
     expect(manifest, contains('android.permission.INTERNET'));
-    expect(source, contains("title: const Text('Supprimer ce document ?')"));
+    expect(
+      source,
+      contains("title: const LocalizedText('Supprimer ce document ?')"),
+    );
     expect(source, contains('_confirmDeleteDocument(doc)'));
   });
 

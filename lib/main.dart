@@ -19,6 +19,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'app_config.dart';
 import 'l10n/app_localizations.dart';
+import 'l10n/ui_localization.dart';
 import 'widgets/voice_input_button.dart';
 import 'signature_pad.dart';
 import 'letter_signature_service.dart';
@@ -1297,9 +1298,10 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                       'assets/google_g_logo.png',
                                       width: 20,
                                       height: 20,
-                                      semanticLabel: 'Google',
+                                      semanticLabel: uiText(context, 'Google'),
                                     ),
-                              label: const Text('Continuer avec Google'),
+                              label:
+                                  const LocalizedText('Continuer avec Google'),
                             ),
                           ),
                           const SizedBox(height: 18),
@@ -1308,7 +1310,7 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                             Padding(
                               padding:
                                   const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text('ou',
+                              child: LocalizedText('ou',
                                   style: Theme.of(context).textTheme.bodySmall),
                             ),
                             const Expanded(child: Divider()),
@@ -1322,7 +1324,7 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                       passwordVisible = false;
                                     })
                                 : null,
-                            child: const Text('Créer mon compte'),
+                            child: const LocalizedText('Créer mon compte'),
                           ),
                           const SizedBox(height: 10),
                           OutlinedButton(
@@ -1333,15 +1335,16 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                       passwordVisible = false;
                                     })
                                 : null,
-                            child: const Text('J’ai déjà un compte'),
+                            child: const LocalizedText('J’ai déjà un compte'),
                           ),
                           if (!widget.authSession.isServiceAvailable) ...[
                             const SizedBox(height: 16),
-                            const Text('Service temporairement indisponible.',
+                            const LocalizedText(
+                                'Service temporairement indisponible.',
                                 textAlign: TextAlign.center),
                           ],
                         ] else ...[
-                          Text(
+                          LocalizedText(
                               createAccount! ? 'Créer mon compte' : 'Connexion',
                               style: Theme.of(context).textTheme.titleLarge),
                           const SizedBox(height: 16),
@@ -1350,8 +1353,8 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                             controller: email,
                             keyboardType: TextInputType.emailAddress,
                             autofillHints: const [AutofillHints.email],
-                            decoration: const InputDecoration(
-                                labelText: 'Adresse e-mail'),
+                            decoration: InputDecoration(
+                                labelText: uiText(context, 'Adresse e-mail')),
                           ),
                           const SizedBox(height: 12),
                           TextField(
@@ -1362,12 +1365,15 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                 ? const [AutofillHints.newPassword]
                                 : const [AutofillHints.password],
                             decoration: InputDecoration(
-                              labelText: 'Mot de passe',
+                              labelText: uiText(context, 'Mot de passe'),
                               suffixIcon: IconButton(
                                 key: const Key('auth-password-visibility'),
-                                tooltip: passwordVisible
-                                    ? 'Masquer le mot de passe'
-                                    : 'Afficher le mot de passe',
+                                tooltip: uiText(
+                                  context,
+                                  passwordVisible
+                                      ? 'Masquer le mot de passe'
+                                      : 'Afficher le mot de passe',
+                                ),
                                 icon: Icon(passwordVisible
                                     ? Icons.visibility_off
                                     : Icons.visibility),
@@ -1386,7 +1392,7 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                     dimension: 20,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2))
-                                : Text(createAccount!
+                                : LocalizedText(createAccount!
                                     ? 'Créer mon compte'
                                     : 'Se connecter'),
                           ),
@@ -1394,7 +1400,8 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                             TextButton(
                               key: const Key('auth-forgot-password'),
                               onPressed: busy ? null : _resetPassword,
-                              child: const Text('Mot de passe oublié ?'),
+                              child:
+                                  const LocalizedText('Mot de passe oublié ?'),
                             ),
                           TextButton(
                             key: const Key('auth-back'),
@@ -1404,12 +1411,12 @@ class _WelcomeAuthScreenState extends State<WelcomeAuthScreen> {
                                       createAccount = null;
                                       passwordVisible = false;
                                     }),
-                            child: const Text('Retour'),
+                            child: const LocalizedText('Retour'),
                           ),
                         ],
                         if (message != null) ...[
                           const SizedBox(height: 12),
-                          Text(message!,
+                          LocalizedText(message!,
                               key: const Key('auth-message'),
                               textAlign: TextAlign.center),
                         ],
@@ -1514,7 +1521,7 @@ class _AuthAdministrativeBackground extends StatelessWidget {
                             color: color,
                             size: constraints.maxWidth < 390 ? 36 : 42),
                         const SizedBox(height: 3),
-                        Text(items[index].$2,
+                        LocalizedText(items[index].$2,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 color: color,
@@ -1582,8 +1589,8 @@ class AdminFacileLogo extends StatelessWidget {
               fit: BoxFit.contain,
               alignment: Alignment.center,
               filterQuality: FilterQuality.high,
-              semanticLabel:
-                  'ADMIN FACILE. Vos démarches administratives, simplifiées par l’IA',
+              semanticLabel: uiText(context,
+                  'ADMIN FACILE. Vos démarches administratives, simplifiées par l’IA'),
               errorBuilder: (context, error, stackTrace) => const Center(
                 child: _BrandLockup(
                   markSize: 82,
@@ -1613,7 +1620,7 @@ class AdminFacileMark extends StatelessWidget {
             fit: BoxFit.contain,
             alignment: Alignment.center,
             filterQuality: FilterQuality.high,
-            semanticLabel: 'Symbole Admin Facile',
+            semanticLabel: uiText(context, 'Symbole Admin Facile'),
             errorBuilder: (context, error, stackTrace) =>
                 CustomPaint(painter: _ShieldLogoPainter()),
           ),
@@ -1692,7 +1699,7 @@ class _BrandLockup extends StatelessWidget {
                           text: 'Facile',
                           style: TextStyle(color: Color(0xFF2588FF))),
                     ])),
-                Text('Votre assistant administratif',
+                LocalizedText('Votre assistant administratif',
                     style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: subtitleSize)),
@@ -1873,27 +1880,27 @@ class _AppShellState extends State<AppShell> {
           selectedIndex: index,
           height: widget.settings.comfortMode ? 82 : 72,
           onDestinationSelected: (value) => setState(() => index = value),
-          destinations: const [
+          destinations: [
             NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home),
-                label: 'Accueil'),
+                icon: const Icon(Icons.home_outlined),
+                selectedIcon: const Icon(Icons.home),
+                label: uiText(context, 'Accueil')),
             NavigationDestination(
-                icon: Icon(Icons.document_scanner_outlined),
-                selectedIcon: Icon(Icons.document_scanner),
-                label: 'Scanner'),
+                icon: const Icon(Icons.document_scanner_outlined),
+                selectedIcon: const Icon(Icons.document_scanner),
+                label: uiText(context, 'Scanner')),
             NavigationDestination(
-                icon: Icon(Icons.edit_note_outlined),
-                selectedIcon: Icon(Icons.edit_note),
-                label: 'Lettres'),
+                icon: const Icon(Icons.edit_note_outlined),
+                selectedIcon: const Icon(Icons.edit_note),
+                label: uiText(context, 'Lettres')),
             NavigationDestination(
-                icon: Icon(Icons.folder_outlined),
-                selectedIcon: Icon(Icons.folder),
-                label: 'Documents'),
+                icon: const Icon(Icons.folder_outlined),
+                selectedIcon: const Icon(Icons.folder),
+                label: uiText(context, 'Documents')),
             NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'Profil'),
+                icon: const Icon(Icons.person_outline),
+                selectedIcon: const Icon(Icons.person),
+                label: uiText(context, 'Profil')),
           ],
         ),
       ),
@@ -1938,12 +1945,12 @@ class _AdminDrawer extends StatelessWidget {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text('ADMIN FACILE',
+                    LocalizedText('ADMIN FACILE',
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 21,
                             fontWeight: FontWeight.w900)),
-                    Text('Votre espace administratif',
+                    LocalizedText('Votre espace administratif',
                         style: TextStyle(
                             color:
                                 Theme.of(context).colorScheme.onSurfaceVariant,
@@ -2015,13 +2022,13 @@ class _AdminDrawer extends StatelessWidget {
           onTap: () => showDialog<void>(
             context: context,
             builder: (dialogContext) => AlertDialog(
-              title: const Text('Version Premium'),
-              content:
-                  const Text('La version Premium sera bientôt disponible.'),
+              title: const LocalizedText('Version Premium'),
+              content: const LocalizedText(
+                  'La version Premium sera bientôt disponible.'),
               actions: [
                 FilledButton(
                   onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Fermer'),
+                  child: const LocalizedText('Fermer'),
                 ),
               ],
             ),
@@ -2033,7 +2040,8 @@ class _AdminDrawer extends StatelessWidget {
               Icon(dark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
                   color: const Color(0xFF2588FF)),
               const SizedBox(width: 10),
-              Expanded(child: Text(dark ? 'Mode sombre' : 'Mode clair')),
+              Expanded(
+                  child: LocalizedText(dark ? 'Mode sombre' : 'Mode clair')),
               Switch(value: dark, onChanged: (_) => settings.toggleLightDark())
             ])),
       ])),
@@ -2068,12 +2076,13 @@ class _DrawerEntry extends StatelessWidget {
                 (selected
                     ? const Color(0xFF2588FF)
                     : Theme.of(context).colorScheme.onSurfaceVariant)),
-        title: Text(label,
+        title: LocalizedText(label,
             style: TextStyle(
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w600)),
         subtitle: subtitle == null
             ? null
-            : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis),
+            : LocalizedText(subtitle!,
+                maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: const Icon(Icons.chevron_right_rounded, size: 20),
         onTap: onTap,
       ));
@@ -2144,7 +2153,7 @@ class NotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         key: const Key('notifications-screen'),
         appBar: AppBar(
-          title: const Text('Notifications'),
+          title: const LocalizedText('Notifications'),
           actions: [
             AnimatedBuilder(
               animation: store,
@@ -2153,7 +2162,7 @@ class NotificationsScreen extends StatelessWidget {
                       ? TextButton(
                           key: const Key('notifications-mark-all-read'),
                           onPressed: store.markAllRead,
-                          child: const Text('Tout marquer comme lu'),
+                          child: const LocalizedText('Tout marquer comme lu'),
                         )
                       : const SizedBox.shrink(),
             ),
@@ -2171,10 +2180,10 @@ class NotificationsScreen extends StatelessWidget {
                     children: [
                       Icon(Icons.notifications_none_rounded, size: 52),
                       SizedBox(height: 16),
-                      Text('Aucune notification pour le moment',
+                      LocalizedText('Aucune notification pour le moment',
                           textAlign: TextAlign.center),
                       SizedBox(height: 8),
-                      Text(
+                      LocalizedText(
                         'Les rappels et informations importantes apparaîtront ici.',
                         textAlign: TextAlign.center,
                       ),
@@ -2208,8 +2217,8 @@ class NotificationsScreen extends StatelessWidget {
                           ),
                       ],
                     ),
-                    title: Text(item.message),
-                    subtitle: Text(_dateTime(item.createdAt)),
+                    title: LocalizedText(item.message),
+                    subtitle: LocalizedText(_dateTime(item.createdAt)),
                     trailing: item.targetType == null
                         ? null
                         : const Icon(Icons.chevron_right_rounded),
@@ -2230,14 +2239,14 @@ class _NotificationDocumentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         key: const Key('notification-document-target'),
-        appBar: AppBar(title: Text(document.title)),
+        appBar: AppBar(title: LocalizedText(document.title)),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Text(document.organisation,
+            LocalizedText(document.organisation,
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Text('${document.category} • ${document.status}'),
+            LocalizedText('${document.category} • ${document.status}'),
             if (document.extractedText.isNotEmpty) ...[
               const SizedBox(height: 20),
               SelectableText(document.extractedText),
@@ -2254,14 +2263,14 @@ class _NotificationProcedureScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         key: const Key('notification-procedure-target'),
-        appBar: AppBar(title: Text(procedure.title)),
+        appBar: AppBar(title: LocalizedText(procedure.title)),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Text(procedure.organisation,
+            LocalizedText(procedure.organisation,
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Text('${procedure.category} • ${procedure.status.label}'),
+            LocalizedText('${procedure.category} • ${procedure.status.label}'),
             const SizedBox(height: 20),
             SelectableText(procedure.letter),
           ],
@@ -2348,7 +2357,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
         .where((model) => favoriteModelIds.contains(model.id))
         .toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Recherche globale')),
+      appBar: AppBar(title: const LocalizedText('Recherche globale')),
       body: SafeArea(
           child: ListView(padding: const EdgeInsets.all(18), children: [
         TextField(
@@ -2365,7 +2374,8 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                           controller.clear();
                           setState(() => query = '');
                         }),
-                hintText: 'CAF, Orange, facture, résiliation…')),
+                hintText:
+                    uiText(context, 'CAF, Orange, facture, résiliation…'))),
         const SizedBox(height: 18),
         if (query.trim().isEmpty)
           const _SearchEmptyState(
@@ -2381,15 +2391,17 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
               subtitle:
                   'Essayez un organisme, un sujet ou un mot présent dans le document.'),
         if (modelResults.isNotEmpty) ...[
-          Text('Modèles de lettres (${modelResults.length})',
+          LocalizedText('Modèles de lettres (${modelResults.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           ...modelResults.take(4).map((model) => Card(
                 child: ListTile(
                   leading: const Icon(Icons.description_outlined),
-                  title: Text(model.title),
-                  subtitle: Text('${model.category} • ${model.description}',
-                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  title: LocalizedText(model.title),
+                  subtitle: LocalizedText(
+                      '${model.category} • ${model.description}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) => LetterModelDetailScreen(
@@ -2403,20 +2415,21 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) =>
                         JsonLibraryScreen(settings: widget.settings))),
-                child: const Text('Voir tout'),
+                child: const LocalizedText('Voir tout'),
               ),
             ),
           const SizedBox(height: 16),
         ],
         if (procedures.isNotEmpty) ...[
-          Text('Mes démarches (${procedures.length})',
+          LocalizedText('Mes démarches (${procedures.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           ...procedures.take(4).map((e) => Card(
               child: ListTile(
                   leading: Icon(e.status.icon, color: const Color(0xFF2588FF)),
-                  title: Text(e.title),
-                  subtitle: Text('${e.organisation} • ${e.status.label}'),
+                  title: LocalizedText(e.title),
+                  subtitle:
+                      LocalizedText('${e.organisation} • ${e.status.label}'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) =>
@@ -2424,15 +2437,15 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
           const SizedBox(height: 16),
         ],
         if (documents.isNotEmpty) ...[
-          Text('Mes documents (${documents.length})',
+          LocalizedText('Mes documents (${documents.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           ...documents.take(4).map((e) => Card(
               child: ListTile(
                   leading: const Icon(Icons.description_rounded,
                       color: Color(0xFF20B98B)),
-                  title: Text(e.title),
-                  subtitle: Text('${e.organisation} • ${e.category}'),
+                  title: LocalizedText(e.title),
+                  subtitle: LocalizedText('${e.organisation} • ${e.category}'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) => DocumentsScreen(
@@ -2440,15 +2453,15 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
         ],
         if (favoriteResults.isNotEmpty) ...[
           const SizedBox(height: 16),
-          Text('Favoris (${favoriteResults.length})',
+          LocalizedText('Favoris (${favoriteResults.length})',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           ...favoriteResults.take(4).map((model) => Card(
                 child: ListTile(
                   leading:
                       const Icon(Icons.star_rounded, color: Color(0xFFFFAD1F)),
-                  title: Text(model.title),
-                  subtitle: Text(model.category),
+                  title: LocalizedText(model.title),
+                  subtitle: LocalizedText(model.category),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) => LetterModelDetailScreen(
                           settings: widget.settings, record: model))),
@@ -2462,7 +2475,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                   builder: (_) =>
                       JsonLibraryScreen(settings: widget.settings))),
               icon: const Icon(Icons.menu_book_rounded),
-              label: Text('Chercher « $query » dans les modèles')),
+              label: LocalizedText('Chercher « $query » dans les modèles')),
         ],
       ])),
     );
@@ -2479,9 +2492,9 @@ class _SearchEmptyState extends StatelessWidget {
         const Icon(Icons.manage_search_rounded,
             size: 76, color: Color(0xFF2588FF)),
         const SizedBox(height: 16),
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        LocalizedText(title, style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 7),
-        Text(subtitle,
+        LocalizedText(subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -2647,7 +2660,7 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     Row(children: [
                       IconButton(
-                        tooltip: 'Menu',
+                        tooltip: uiText(context, 'Menu'),
                         onPressed: openMenu,
                         icon: const Icon(Icons.menu_rounded),
                       ),
@@ -2656,25 +2669,25 @@ class HomeScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(settings.greeting,
+                            LocalizedText(settings.greeting,
                                 key: const Key('dashboard-greeting'),
                                 style: Theme.of(context)
                                     .textTheme
                                     .headlineSmall
                                     ?.copyWith(fontWeight: FontWeight.w800)),
-                            Text('Votre assistant administratif',
+                            LocalizedText('Votre assistant administratif',
                                 style: Theme.of(context).textTheme.bodySmall),
                           ],
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Recherche globale',
+                        tooltip: uiText(context, 'Recherche globale'),
                         onPressed: openGlobalSearch,
                         icon: const Icon(Icons.search_rounded),
                       ),
                       IconButton.filledTonal(
                         key: const Key('dashboard-profile-button'),
-                        tooltip: 'Profil',
+                        tooltip: uiText(context, 'Profil'),
                         onPressed: openProfile,
                         icon: const Icon(Icons.person_rounded),
                       ),
@@ -2707,7 +2720,7 @@ class HomeScreen extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
+                                LocalizedText(
                                   _currentSupabaseUser == null
                                       ? 'Compte déconnecté'
                                       : 'Compte connecté',
@@ -2717,7 +2730,7 @@ class HomeScreen extends StatelessWidget {
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700),
                                 ),
-                                Text(
+                                LocalizedText(
                                   _supabaseConfigured
                                       ? 'Synchronisation disponible'
                                       : 'Synchronisation indisponible',
@@ -2739,7 +2752,7 @@ class HomeScreen extends StatelessWidget {
                               color: syncColor.withValues(alpha: .12),
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            child: Text(
+                            child: LocalizedText(
                               _currentSupabaseUser != null
                                   ? 'Synchronisé'
                                   : 'Local',
@@ -2828,10 +2841,10 @@ class HomeScreen extends StatelessWidget {
                           child: _DashboardTitle('Activité récente')),
                       TextButton(
                           onPressed: openDocuments,
-                          child: const Text('Documents')),
+                          child: const LocalizedText('Documents')),
                       TextButton(
                           onPressed: openProcedures,
-                          child: const Text('Démarches')),
+                          child: const LocalizedText('Démarches')),
                     ]),
                     _RecentActivity(
                         procedures: procedures,
@@ -2851,7 +2864,7 @@ class _DashboardTitle extends StatelessWidget {
   const _DashboardTitle(this.text);
   final String text;
   @override
-  Widget build(BuildContext context) => Text(text,
+  Widget build(BuildContext context) => LocalizedText(text,
       style: Theme.of(context)
           .textTheme
           .titleMedium
@@ -2890,13 +2903,13 @@ class _MetricCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('$value',
+                    LocalizedText('$value',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             height: 1,
                             color: color,
                             fontWeight: FontWeight.w900)),
                     const SizedBox(height: 2),
-                    Text(label,
+                    LocalizedText(label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -2946,7 +2959,7 @@ class _AttentionList extends StatelessWidget {
               dense: true,
               visualDensity: VisualDensity(vertical: -4),
               leading: Icon(Icons.check_circle_rounded, color: Colors.green),
-              title: Text('Aucune action urgente')));
+              title: LocalizedText('Aucune action urgente')));
     }
     return Card(
         margin: EdgeInsets.zero,
@@ -2956,8 +2969,8 @@ class _AttentionList extends StatelessWidget {
                 dense: true,
                 visualDensity: const VisualDensity(vertical: -3),
                 leading: Icon(item.$1, color: item.$3),
-                title:
-                    Text(item.$2, maxLines: 1, overflow: TextOverflow.ellipsis))
+                title: LocalizedText(item.$2,
+                    maxLines: 1, overflow: TextOverflow.ellipsis))
         ]));
   }
 }
@@ -2993,7 +3006,7 @@ class _QuickAction extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                    child: Text(label,
+                    child: LocalizedText(label,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -3020,7 +3033,7 @@ class _RecentActivity extends StatelessWidget {
       return const Card(
           child: ListTile(
               leading: Icon(Icons.history_rounded),
-              title: Text('Aucune activité récente')));
+              title: LocalizedText('Aucune activité récente')));
     }
     return Card(
         key: const Key('recent-activity'),
@@ -3031,18 +3044,18 @@ class _RecentActivity extends StatelessWidget {
                 visualDensity: const VisualDensity(vertical: -3),
                 onTap: openProcedures,
                 leading: const Icon(Icons.assignment_outlined),
-                title: Text(item.title,
+                title: LocalizedText(item.title,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(item.status.label)),
+                subtitle: LocalizedText(item.status.label)),
           for (final item in documents)
             ListTile(
                 dense: true,
                 visualDensity: const VisualDensity(vertical: -3),
                 onTap: openDocuments,
                 leading: const Icon(Icons.description_outlined),
-                title: Text(item.title,
+                title: LocalizedText(item.title,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(item.category)),
+                subtitle: LocalizedText(item.category)),
         ]));
   }
 }
@@ -3153,14 +3166,14 @@ class LegacyHomeScreen extends StatelessWidget {
                   const SizedBox(height: 22),
                   Row(children: [
                     Expanded(
-                        child: Text('Mes démarches en cours',
+                        child: LocalizedText('Mes démarches en cours',
                             style: TextStyle(
                                 color: Theme.of(context).colorScheme.onSurface,
                                 fontSize: 21,
                                 fontWeight: FontWeight.w800))),
                     TextButton(
                         onPressed: openProcedures,
-                        child: const Text('Voir tout',
+                        child: const LocalizedText('Voir tout',
                             style: TextStyle(color: Color(0xFF4C9CFF)))),
                   ]),
                   const SizedBox(height: 6),
@@ -3233,14 +3246,15 @@ class _DarkHeader extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('ADMIN FACILE',
+                  LocalizedText('ADMIN FACILE',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
                           .textTheme
                           .titleMedium
                           ?.copyWith(fontWeight: FontWeight.w900)),
-                  Text('Vos démarches administratives, simplifiées par l’IA',
+                  LocalizedText(
+                      'Vos démarches administratives, simplifiées par l’IA',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall),
@@ -3272,7 +3286,7 @@ class _DarkHeader extends StatelessWidget {
                 child: CircleAvatar(
                     radius: 10,
                     backgroundColor: const Color(0xFFFF3B3B),
-                    child: Text(
+                    child: LocalizedText(
                         '${notificationCount > 9 ? '9+' : notificationCount}',
                         style: const TextStyle(
                             color: Colors.white,
@@ -3346,19 +3360,19 @@ class _DarkHeroCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('Choisissez une méthode',
+            LocalizedText('Choisissez une méthode',
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 14),
             ListTile(
               key: const Key('letter-method-gemini'),
               leading: const Icon(Icons.auto_awesome_rounded),
-              title: const Text('Générer avec Gemini'),
+              title: const LocalizedText('Générer avec Gemini'),
               onTap: () => Navigator.pop(context, 'gemini'),
             ),
             ListTile(
               key: const Key('letter-method-model'),
               leading: const Icon(Icons.description_outlined),
-              title: const Text('Utiliser un modèle'),
+              title: const LocalizedText('Utiliser un modèle'),
               onTap: () => Navigator.pop(context, 'model'),
             ),
           ]),
@@ -3407,7 +3421,7 @@ class _DarkHeroCard extends StatelessWidget {
           ),
           onPressed: () => _chooseLetterMethod(context),
           icon: const Icon(Icons.edit_note_rounded),
-          label: const Text(
+          label: const LocalizedText(
             'Créer une lettre',
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
@@ -3424,7 +3438,7 @@ class _DarkHeroCard extends StatelessWidget {
           ),
           onPressed: onScan,
           icon: const Icon(Icons.document_scanner_rounded),
-          label: const Text(
+          label: const LocalizedText(
             'Scanner un document',
             style: TextStyle(fontWeight: FontWeight.w800),
           ),
@@ -3452,7 +3466,7 @@ class _DarkHeroCard extends StatelessWidget {
                     size: 15,
                   ),
                   const SizedBox(width: 6),
-                  Text(
+                  LocalizedText(
                     configured
                         ? 'ASSISTANT IA DISPONIBLE'
                         : 'ASSISTANT IA INDISPONIBLE',
@@ -3466,7 +3480,7 @@ class _DarkHeroCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
+            LocalizedText(
               'Simplifiez vos démarches au quotidien',
               style: TextStyle(
                 color: Colors.white,
@@ -3488,7 +3502,7 @@ class _DarkHeroCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Text(
+            LocalizedText(
               'Générez, envoyez et suivez vos courriers administratifs simplement.',
               style: TextStyle(
                 color: const Color(0xFFD7E2F3),
@@ -3731,7 +3745,7 @@ class _DarkShortcut extends StatelessWidget {
                         const SizedBox(height: 10),
                         SizedBox(
                             width: double.infinity,
-                            child: Text(label,
+                            child: LocalizedText(label,
                                 textAlign: TextAlign.center,
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
@@ -3752,7 +3766,8 @@ class _DarkShortcut extends StatelessWidget {
                         child: CircleAvatar(
                             radius: 10,
                             backgroundColor: const Color(0xFFFF3B3B),
-                            child: Text('${badge! > 99 ? '99+' : badge}',
+                            child: LocalizedText(
+                                '${badge! > 99 ? '99+' : badge}',
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 8,
@@ -3790,7 +3805,7 @@ class _DarkProcedurePreview extends StatelessWidget {
                 CircleAvatar(
                     radius: 25,
                     backgroundColor: const Color(0xFF12325C),
-                    child: Text(
+                    child: LocalizedText(
                         item.organisation.isEmpty
                             ? 'A'
                             : item.organisation[0].toUpperCase(),
@@ -3803,7 +3818,7 @@ class _DarkProcedurePreview extends StatelessWidget {
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      Text(item.title,
+                      LocalizedText(item.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -3818,11 +3833,11 @@ class _DarkProcedurePreview extends StatelessWidget {
                             decoration: BoxDecoration(
                                 color: statusColor, shape: BoxShape.circle)),
                         const SizedBox(width: 6),
-                        Text(item.status.label,
+                        LocalizedText(item.status.label,
                             style: const TextStyle(
                                 color: Color(0xFFCFD8E8), fontSize: 12))
                       ]),
-                      Text('Créée le ${d(item.createdAt)}',
+                      LocalizedText('Créée le ${d(item.createdAt)}',
                           style: const TextStyle(
                               color: Color(0xFF93A2B8), fontSize: 11))
                     ])),
@@ -3832,7 +3847,8 @@ class _DarkProcedurePreview extends StatelessWidget {
                   const SizedBox(width: 6),
                   SizedBox(
                       width: 70,
-                      child: Text('Relance le\n${d(item.reminderDate!)}',
+                      child: LocalizedText(
+                          'Relance le\n${d(item.reminderDate!)}',
                           style: const TextStyle(
                               color: Color(0xFFD5DEEC),
                               fontSize: 10.5,
@@ -3864,7 +3880,7 @@ class _DarkEmptyProcedures extends StatelessWidget {
                         color: Color(0xFF4C9CFF))),
                 SizedBox(width: 12),
                 Expanded(
-                    child: Text(
+                    child: LocalizedText(
                         'Aucune démarche en cours. Créez votre première lettre pour commencer le suivi.',
                         style: TextStyle(color: Colors.white, height: 1.3))),
                 Icon(Icons.arrow_forward, color: Colors.white)
@@ -3885,7 +3901,7 @@ class _DarkStats extends StatelessWidget {
           border: Border.all(color: const Color(0xFF15345F)),
           borderRadius: BorderRadius.circular(20)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('À ne pas manquer',
+        const LocalizedText('À ne pas manquer',
             style: TextStyle(
                 color: Colors.white,
                 fontSize: 18,
@@ -3930,12 +3946,12 @@ class _DarkStat extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 100;
-          final valueWidget = Text('$value',
+          final valueWidget = LocalizedText('$value',
               style: const TextStyle(
                   color: Colors.white,
                   fontSize: 25,
                   fontWeight: FontWeight.w900));
-          final labelWidget = Text(label,
+          final labelWidget = LocalizedText(label,
               textAlign: compact ? TextAlign.center : TextAlign.start,
               style: const TextStyle(
                   color: Colors.white, fontSize: 10.5, height: 1.18));
@@ -4000,7 +4016,7 @@ class _SmallDarkAction extends StatelessWidget {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         icon: Icon(icon, size: 18),
-        label: FittedBox(child: Text(label)),
+        label: FittedBox(child: LocalizedText(label)),
       ),
     );
   }
@@ -4047,7 +4063,7 @@ class _PrivacyCardState extends State<PrivacyCard> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                  child: Text('Confidentialité',
+                  child: LocalizedText('Confidentialité',
                       style: TextStyle(
                           color: foreground,
                           fontSize: 17,
@@ -4057,7 +4073,7 @@ class _PrivacyCardState extends State<PrivacyCard> {
             ]),
             if (expanded) ...[
               const SizedBox(height: 12),
-              Text(
+              LocalizedText(
                 'Vos documents restent enregistrés localement par défaut. Si vous choisissez la synchronisation, le document PDF ou l’image et votre signature sont envoyés dans votre espace privé Supabase ; votre adresse e-mail y sert à gérer le compte. '
                 'Lorsque vous utilisez Gemini, seul le texte nécessaire à l’analyse est envoyé : le PDF ou la photo ne sont pas transmis à Gemini.\n\n'
                 'Vérifiez toujours les informations importantes avant tout partage ou envoi.',
@@ -4068,7 +4084,7 @@ class _PrivacyCardState extends State<PrivacyCard> {
               ),
             ] else ...[
               const SizedBox(height: 7),
-              Text('Stockage local • Touchez pour en savoir plus',
+              LocalizedText('Stockage local • Touchez pour en savoir plus',
                   style: TextStyle(
                       color: foreground.withValues(alpha: .85),
                       fontWeight: FontWeight.w600)),
@@ -4396,7 +4412,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       setState(() => processingStep = DocumentProcessingStep.completed);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(result.partialResult
+            content: LocalizedText(result.partialResult
                 ? 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's récupérées' : ' récupérée'}'
                 : 'PDF prêt • ${result.pageCount} page${result.pageCount > 1 ? 's' : ''}')),
       );
@@ -4438,8 +4454,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() => processing = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Lecture impossible : $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: LocalizedText('Lecture impossible : $error')));
     }
   }
 
@@ -4515,8 +4531,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Import impossible : $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: LocalizedText('Import impossible : $error')));
     }
   }
 
@@ -4545,7 +4561,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Future<void> _addSignatureToDocument() async {
     if (!appSettings.hasSignature) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enregistrez d’abord votre signature dans votre profil.'),
+        content: LocalizedText(
+            'Enregistrez d’abord votre signature dans votre profil.'),
       ));
       return;
     }
@@ -4578,13 +4595,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Une copie signée du document a été créée.')),
+            content:
+                LocalizedText('Une copie signée du document a été créée.')),
       );
     } catch (error, stackTrace) {
       debugPrint('Signature du document impossible : $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Signature impossible : $error')),
+          SnackBar(content: LocalizedText('Signature impossible : $error')),
         );
       }
     } finally {
@@ -4599,7 +4617,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text(
+            content: LocalizedText(
                 'Ce PDF doit d’abord être enregistré localement pour être ouvert.')),
       );
       return;
@@ -4616,7 +4634,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ouverture impossible : $error')));
+          SnackBar(content: LocalizedText('Ouverture impossible : $error')));
     }
   }
 
@@ -4625,7 +4643,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         textController.text.trim().isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Scannez ou ajoutez d’abord un document.')));
+          content: LocalizedText('Scannez ou ajoutez d’abord un document.')));
       return;
     }
     setState(() => processing = true);
@@ -4661,12 +4679,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
         userCorrectedAnalysis: _userCorrectedAnalysis,
       ));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Document ajouté à Mes documents.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: LocalizedText('Document ajouté à Mes documents.')));
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Archivage impossible : $error')));
+          SnackBar(content: LocalizedText('Archivage impossible : $error')));
     } finally {
       if (mounted) setState(() => processing = false);
     }
@@ -4677,8 +4695,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final path = pdfPath!;
     if (path.startsWith('content://')) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Utilisez “Imprimer / partager le PDF” pour ce document.')));
+          content: LocalizedText(
+              'Utilisez “Imprimer / partager le PDF” pour ce document.')));
       return;
     }
     await SharePlus.instance.share(ShareParams(
@@ -4692,7 +4710,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final path = pdfPath!;
     if (path.startsWith('content://')) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
+          content: LocalizedText(
               'Le PDF doit d’abord être enregistré dans le stockage de l’application.')));
       return;
     }
@@ -4704,8 +4722,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   void prepareReply() {
     if (textController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Ajoutez d’abord le texte du courrier pour l’analyser.')));
+          content: LocalizedText(
+              'Ajoutez d’abord le texte du courrier pour l’analyser.')));
       return;
     }
     Navigator.of(context).push(MaterialPageRoute(
@@ -4741,7 +4759,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Corriger les informations'),
+          title: const LocalizedText('Corriger les informations'),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<String>(
@@ -4749,11 +4767,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     SmartDocumentLocalAnalyzer.documentTypes.contains(type)
                         ? type
                         : 'Document inconnu',
-                decoration:
-                    const InputDecoration(labelText: 'Type du document'),
+                decoration: InputDecoration(
+                    labelText: uiText(context, 'Type du document')),
                 items: SmartDocumentLocalAnalyzer.documentTypes
-                    .map((value) =>
-                        DropdownMenuItem(value: value, child: Text(value)))
+                    .map((value) => DropdownMenuItem(
+                        value: value, child: LocalizedText(value)))
                     .toList(),
                 onChanged: (value) {
                   if (value != null) setDialogState(() => type = value);
@@ -4762,25 +4780,28 @@ class _ScannerScreenState extends State<ScannerScreen> {
               const SizedBox(height: 10),
               TextField(
                   controller: organisation,
-                  decoration: const InputDecoration(
-                      labelText: 'Fournisseur ou organisme')),
+                  decoration: InputDecoration(
+                      labelText: uiText(context, 'Fournisseur ou organisme'))),
               const SizedBox(height: 10),
               TextField(
                   controller: amount,
-                  decoration:
-                      const InputDecoration(labelText: 'Montant total')),
+                  decoration: InputDecoration(
+                      labelText: uiText(context, 'Montant total'))),
               const SizedBox(height: 10),
               TextField(
                   controller: dueDate,
-                  decoration: const InputDecoration(labelText: 'Date limite')),
+                  decoration: InputDecoration(
+                      labelText: uiText(context, 'Date limite'))),
               const SizedBox(height: 10),
               TextField(
                   controller: reference,
-                  decoration: const InputDecoration(labelText: 'Référence')),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Référence'))),
               const SizedBox(height: 10),
               TextField(
                   controller: category,
-                  decoration: const InputDecoration(labelText: 'Catégorie')),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Catégorie'))),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 initialValue: const [
@@ -4790,14 +4811,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ].contains(priority)
                     ? priority
                     : 'À vérifier',
-                decoration: const InputDecoration(labelText: 'Priorité'),
+                decoration:
+                    InputDecoration(labelText: uiText(context, 'Priorité')),
                 items: const [
                   'Aucune action urgente détectée',
                   'À vérifier',
                   'Échéance ou réponse proche'
                 ]
-                    .map((value) =>
-                        DropdownMenuItem(value: value, child: Text(value)))
+                    .map((value) => DropdownMenuItem(
+                        value: value, child: LocalizedText(value)))
                     .toList(),
                 onChanged: (value) {
                   if (value != null) setDialogState(() => priority = value);
@@ -4808,10 +4830,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Annuler')),
+                child: const LocalizedText('Annuler')),
             FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Enregistrer')),
+                child: const LocalizedText('Enregistrer')),
           ],
         ),
       ),
@@ -4872,8 +4894,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
             padding: const EdgeInsets.only(top: 9),
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text(value,
+              LocalizedText(label,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              LocalizedText(value,
                   style: const TextStyle(
                       fontSize: 17, fontWeight: FontWeight.w800))
             ]),
@@ -4887,7 +4910,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             Icon(Icons.auto_awesome, color: color),
             const SizedBox(width: 9),
             Expanded(
-                child: Text(insight.documentType,
+                child: LocalizedText(insight.documentType,
                     style: Theme.of(context)
                         .textTheme
                         .titleLarge
@@ -4905,8 +4928,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
           const SizedBox(height: 12),
           Chip(
               avatar: CircleAvatar(backgroundColor: color, radius: 6),
-              label: Text(insight.priority)),
-          const Text(
+              label: LocalizedText(insight.priority)),
+          const LocalizedText(
               'Vérifiez les informations importantes dans le document original.'),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
@@ -4916,7 +4939,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   key: const Key('correct-analysis'),
                   onPressed: _correctAnalysis,
                   icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Corriger')),
+                  label: const LocalizedText('Corriger')),
             ),
             Tooltip(
               message: 'Améliorer avec Gemini',
@@ -4924,11 +4947,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   key: const Key('scanner-gemini-improve'),
                   onPressed: prepareReply,
                   icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Améliorer avec Gemini')),
+                  label: const LocalizedText('Améliorer avec Gemini')),
             ),
             PopupMenuButton<String>(
               key: const Key('scanner-smart-more-menu'),
-              tooltip: 'Plus d’actions',
+              tooltip: uiText(context, 'Plus d’actions'),
               icon: const Icon(Icons.more_horiz_rounded),
               onSelected: (action) {
                 if (action == 'Contester cette facture') {
@@ -4985,7 +5008,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                               Icons.cloud_upload_outlined,
                             _ => Icons.arrow_forward,
                           }),
-                          title: Text(action),
+                          title: LocalizedText(action),
                         ),
                       ))
                   .toList(),
@@ -5000,13 +5023,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Widget build(BuildContext context) {
     return SafeArea(
         child: ListView(padding: const EdgeInsets.all(20), children: [
-      Text('Scanner un document A4',
+      LocalizedText('Scanner un document A4',
           style: Theme.of(context)
               .textTheme
               .headlineMedium
               ?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      const Text(
+      const LocalizedText(
           'Placez la feuille dans le cadre. L’application détecte les bords, recadre le document et corrige la perspective.'),
       const SizedBox(height: 10),
       const Card(
@@ -5016,7 +5039,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             Icon(Icons.crop_free_rounded),
             SizedBox(width: 10),
             Expanded(
-              child: Text(
+              child: LocalizedText(
                 'Cadrez toute la feuille. Après la capture, ajustez les quatre poignées si nécessaire, choisissez le filtre puis validez dans le scanner.',
               ),
             ),
@@ -5031,7 +5054,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             icon: const Icon(Icons.document_scanner),
             label: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('Scanner')),
+                child: LocalizedText('Scanner')),
           )),
       const SizedBox(height: 10),
       Row(children: [
@@ -5040,13 +5063,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 onPressed:
                     processing ? null : () => pickAndRead(ImageSource.camera),
                 icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Photo'))),
+                label: const LocalizedText('Photo'))),
         const SizedBox(width: 10),
         Expanded(
             child: OutlinedButton.icon(
                 onPressed: processing ? null : importFile,
                 icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Importer'))),
+                label: const LocalizedText('Importer'))),
       ]),
       if (!processing && (pdfPath != null || imagePath != null)) ...[
         const SizedBox(height: 10),
@@ -5056,7 +5079,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             key: const Key('scanner-add-signature'),
             onPressed: _addSignatureToDocument,
             icon: const Icon(Icons.draw_outlined),
-            label: const Text('Ajouter ma signature'),
+            label: const LocalizedText('Ajouter ma signature'),
           ),
         ),
       ],
@@ -5070,7 +5093,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               const SizedBox(height: 16),
               Icon(processingStep.icon, size: 30),
               const SizedBox(height: 8),
-              Text(
+              LocalizedText(
                 processingStep.label,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontWeight: FontWeight.w700),
@@ -5100,7 +5123,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     color: Theme.of(context).colorScheme.onErrorContainer),
                 const SizedBox(width: 10),
                 Expanded(
-                    child: Text(
+                    child: LocalizedText(
                   'Le scan a échoué',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onErrorContainer,
@@ -5110,7 +5133,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 )),
               ]),
               const SizedBox(height: 8),
-              Text(
+              LocalizedText(
                 scanError!,
                 style: TextStyle(
                     color: Theme.of(context).colorScheme.onErrorContainer),
@@ -5119,7 +5142,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               FilledButton.icon(
                 onPressed: scanA4,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Réessayer'),
+                label: const LocalizedText('Réessayer'),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -5130,13 +5153,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     key: const Key('scanner-fallback-camera'),
                     onPressed: () => pickAndRead(ImageSource.camera),
                     icon: const Icon(Icons.photo_camera_outlined),
-                    label: const Text('Prendre une photo'),
+                    label: const LocalizedText('Prendre une photo'),
                   ),
                   OutlinedButton.icon(
                     key: const Key('scanner-fallback-import'),
                     onPressed: importFile,
                     icon: const Icon(Icons.upload_file_outlined),
-                    label: const Text('Importer un document'),
+                    label: const LocalizedText('Importer un document'),
                   ),
                 ],
               ),
@@ -5154,7 +5177,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       const Icon(Icons.picture_as_pdf, size: 34),
                       const SizedBox(width: 12),
                       Expanded(
-                          child: Text(
+                          child: LocalizedText(
                               'PDF prêt${scannedPages > 0 ? ' • $scannedPages page${scannedPages > 1 ? 's' : ''}' : ''}',
                               style: const TextStyle(
                                   fontWeight: FontWeight.bold, fontSize: 17)))
@@ -5167,12 +5190,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
                             key: const Key('scanner-pdf-open'),
                             onPressed: _openPdf,
                             icon: const Icon(Icons.open_in_new_rounded),
-                            label: const Text('Ouvrir')),
+                            label: const LocalizedText('Ouvrir')),
                       ),
                       const Spacer(),
                       PopupMenuButton<String>(
                         key: const Key('scanner-pdf-more-menu'),
-                        tooltip: 'Plus d’actions',
+                        tooltip: uiText(context, 'Plus d’actions'),
                         icon: const Icon(Icons.more_horiz_rounded),
                         onSelected: (value) {
                           if (value == 'archive') {
@@ -5190,21 +5213,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
                                   dense: true,
                                   contentPadding: EdgeInsets.zero,
                                   leading: Icon(Icons.folder_copy_outlined),
-                                  title: Text('Ajouter à Mes documents'))),
+                                  title: LocalizedText(
+                                      'Ajouter à Mes documents'))),
                           PopupMenuItem(
                               value: 'share',
                               child: ListTile(
                                   dense: true,
                                   contentPadding: EdgeInsets.zero,
                                   leading: Icon(Icons.share_outlined),
-                                  title: Text('Transmettre'))),
+                                  title: LocalizedText('Transmettre'))),
                           PopupMenuItem(
                               value: 'print',
                               child: ListTile(
                                   dense: true,
                                   contentPadding: EdgeInsets.zero,
                                   leading: Icon(Icons.print_outlined),
-                                  title: Text('Imprimer'))),
+                                  title: LocalizedText('Imprimer'))),
                         ],
                       ),
                     ]),
@@ -5224,7 +5248,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             key: const Key('scanner-translate'),
             onPressed: _openDocumentTranslation,
             icon: const Icon(Icons.translate_rounded),
-            label: const Text('Traduire'),
+            label: const LocalizedText('Traduire'),
           ),
         ),
         const SizedBox(height: 8),
@@ -5232,14 +5256,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
           alignment: Alignment.centerRight,
           child: PopupMenuButton<String>(
             key: const Key('scanner-advanced-analysis'),
-            tooltip: 'Analyse avancée',
+            tooltip: uiText(context, 'Analyse avancée'),
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (value) {
               if (value == 'ocr') {
                 showDialog<void>(
                   context: context,
                   builder: (dialogContext) => AlertDialog(
-                    title: const Text('Texte OCR'),
+                    title: const LocalizedText('Texte OCR'),
                     content: SizedBox(
                       width: 520,
                       child: SingleChildScrollView(
@@ -5248,7 +5272,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(dialogContext),
-                          child: const Text('Fermer'))
+                          child: const LocalizedText('Fermer'))
                     ],
                   ),
                 );
@@ -5261,7 +5285,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             itemBuilder: (_) => const [
               PopupMenuItem(
                 enabled: false,
-                child: Text('Analyse avancée',
+                child: LocalizedText('Analyse avancée',
                     style: TextStyle(fontWeight: FontWeight.bold)),
               ),
               PopupMenuItem(
@@ -5269,21 +5293,21 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 child: ListTile(
                     dense: true,
                     leading: Icon(Icons.text_snippet_outlined),
-                    title: Text('Voir le texte OCR')),
+                    title: LocalizedText('Voir le texte OCR')),
               ),
               PopupMenuItem(
                 value: 'analysis',
                 child: ListTile(
                     dense: true,
                     leading: Icon(Icons.auto_awesome_outlined),
-                    title: Text('Analyse Gemini')),
+                    title: LocalizedText('Analyse Gemini')),
               ),
               PopupMenuItem(
                 value: 'correct',
                 child: ListTile(
                     dense: true,
                     leading: Icon(Icons.edit_outlined),
-                    title: Text('Corriger les informations')),
+                    title: LocalizedText('Corriger les informations')),
               ),
             ],
           ),
@@ -5406,10 +5430,10 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
     final placement = currentPlacement;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Placer ma signature'),
+        title: const LocalizedText('Placer ma signature'),
         leading: IconButton(
           key: const Key('signature-editor-cancel'),
-          tooltip: 'Annuler',
+          tooltip: uiText(context, 'Annuler'),
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.close),
         ),
@@ -5427,7 +5451,7 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
                 itemCount: widget.pages.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (_, index) => ChoiceChip(
-                  label: Text(
+                  label: LocalizedText(
                       'Page ${index + 1}${placements.any((item) => item.pageIndex == index) ? ' • signée' : ''}'),
                   selected: pageIndex == index,
                   onSelected: (_) => _selectPage(index),
@@ -5618,14 +5642,14 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Padding(
                           padding: const EdgeInsets.only(left: 10),
-                          child: Text('${(_pageZoom * 100).round()} %',
+                          child: LocalizedText('${(_pageZoom * 100).round()} %',
                               key: const Key('signature-zoom-level'),
                               style: const TextStyle(
                                   fontSize: 12, fontWeight: FontWeight.w800)),
                         ),
                         IconButton(
                           key: const Key('signature-reset-zoom'),
-                          tooltip: 'Réinitialiser le zoom',
+                          tooltip: uiText(context, 'Réinitialiser le zoom'),
                           onPressed: _pageZoom > 1.01 ? _resetPageZoom : null,
                           icon: const Icon(Icons.center_focus_strong_rounded),
                         ),
@@ -5648,7 +5672,7 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
                       key: const Key('signature-add-current-page'),
                       onPressed: () => _addCurrent(pageAspect),
                       icon: const Icon(Icons.add),
-                      label: const Text('Ajouter sur cette page'),
+                      label: const LocalizedText('Ajouter sur cette page'),
                     )
                   else
                     OutlinedButton.icon(
@@ -5656,7 +5680,7 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
                       onPressed: () => setState(() => placements
                           .removeWhere((item) => item.pageIndex == pageIndex)),
                       icon: const Icon(Icons.delete_outline),
-                      label: const Text('Supprimer'),
+                      label: const LocalizedText('Supprimer'),
                     ),
                   FilledButton.icon(
                     key: const Key('signature-editor-validate'),
@@ -5667,7 +5691,7 @@ class _DocumentSignatureEditorState extends State<_DocumentSignatureEditor> {
                             List<NormalizedSignaturePlacement>.unmodifiable(
                                 placements)),
                     icon: const Icon(Icons.check),
-                    label: const Text('Valider'),
+                    label: const LocalizedText('Valider'),
                   ),
                 ]),
           ),
@@ -5701,7 +5725,7 @@ class _ProcessingStatusCard extends StatelessWidget {
           Icon(icon, color: color, size: 21),
           const SizedBox(width: 9),
           Expanded(
-              child: Text(text,
+              child: LocalizedText(text,
                   style: const TextStyle(fontWeight: FontWeight.w700)))
         ]),
       );
@@ -5721,7 +5745,7 @@ class _ProcessingStatusCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(15),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('État du traitement',
+        const LocalizedText('État du traitement',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
         const SizedBox(height: 7),
         line(
@@ -5744,7 +5768,7 @@ class _ProcessingStatusCard extends StatelessWidget {
           OutlinedButton.icon(
               onPressed: onRetryOcr,
               icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer l’OCR')),
+              label: const LocalizedText('Réessayer l’OCR')),
         ],
       ]),
     );
@@ -5759,7 +5783,7 @@ class PdfDocumentPreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(title)),
+        appBar: AppBar(title: LocalizedText(title)),
         body: PdfPreview(
           build: (_) async => bytes,
           canChangeOrientation: false,
@@ -5818,22 +5842,22 @@ class InternalDocumentPreviewScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         key: const Key('internal-document-preview'),
         appBar: AppBar(
-          title: Text(title, overflow: TextOverflow.ellipsis),
+          title: LocalizedText(title, overflow: TextOverflow.ellipsis),
           actions: [
             IconButton(
                 key: const Key('preview-share'),
-                tooltip: 'Partager',
+                tooltip: uiText(context, 'Partager'),
                 onPressed: _share,
                 icon: const Icon(Icons.share_outlined)),
             IconButton(
                 key: const Key('preview-download'),
-                tooltip: 'Télécharger',
+                tooltip: uiText(context, 'Télécharger'),
                 onPressed: _download,
                 icon: const Icon(Icons.download_outlined)),
             if (!isImage)
               IconButton(
                   key: const Key('preview-print'),
-                  tooltip: 'Imprimer',
+                  tooltip: uiText(context, 'Imprimer'),
                   onPressed: _print,
                   icon: const Icon(Icons.print_outlined)),
           ],
@@ -5977,7 +6001,7 @@ class _DictationScreenState extends State<DictationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Dictée vocale')),
+      appBar: AppBar(title: const LocalizedText('Dictée vocale')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -5995,7 +6019,7 @@ class _DictationScreenState extends State<DictationScreen> {
                       size: 34,
                     ),
                     const SizedBox(width: 14),
-                    Expanded(child: Text(_status)),
+                    Expanded(child: LocalizedText(_status)),
                   ],
                 ),
               ),
@@ -6005,10 +6029,11 @@ class _DictationScreenState extends State<DictationScreen> {
               controller: _controller,
               minLines: 12,
               maxLines: 22,
-              decoration: const InputDecoration(
-                labelText: 'Texte dicté et modifiable',
+              decoration: InputDecoration(
+                labelText: uiText(context, 'Texte dicté et modifiable'),
                 alignLabelWithHint: true,
-                hintText: 'Appuyez sur le microphone, puis commencez à parler.',
+                hintText: uiText(context,
+                    'Appuyez sur le microphone, puis commencez à parler.'),
               ),
             ),
             const SizedBox(height: 14),
@@ -6017,7 +6042,7 @@ class _DictationScreenState extends State<DictationScreen> {
               icon: Icon(_listening ? Icons.stop_circle : Icons.mic),
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 15),
-                child: Text(
+                child: LocalizedText(
                     _listening ? 'Arrêter la dictée' : 'Commencer la dictée'),
               ),
             ),
@@ -6030,7 +6055,7 @@ class _DictationScreenState extends State<DictationScreen> {
                         ? null
                         : () => setState(() => _controller.clear()),
                     icon: const Icon(Icons.delete_outline),
-                    label: const Text('Effacer'),
+                    label: const LocalizedText('Effacer'),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -6044,17 +6069,18 @@ class _DictationScreenState extends State<DictationScreen> {
                             );
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Texte copié')),
+                              const SnackBar(
+                                  content: LocalizedText('Texte copié')),
                             );
                           },
                     icon: const Icon(Icons.copy),
-                    label: const Text('Copier'),
+                    label: const LocalizedText('Copier'),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 18),
-            const Text(
+            const LocalizedText(
               'Android peut arrêter la reconnaissance après quelques secondes de silence. '
               'Appuyez de nouveau sur le microphone pour continuer votre texte.',
             ),
@@ -6231,7 +6257,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
     final text = _sourceController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saisissez ou collez un texte.')),
+        const SnackBar(content: LocalizedText('Saisissez ou collez un texte.')),
       );
       return;
     }
@@ -6272,7 +6298,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
       if (!mounted) return;
       setState(() => _status = 'Erreur de traduction : $error');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Traduction impossible : $error')),
+        SnackBar(content: LocalizedText('Traduction impossible : $error')),
       );
     } finally {
       translator?.close();
@@ -6294,7 +6320,8 @@ class _TranslationScreenState extends State<TranslationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Traduction administrative • V7.0')),
+      appBar: AppBar(
+          title: const LocalizedText('Traduction administrative • V7.0')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -6304,11 +6331,12 @@ class _TranslationScreenState extends State<TranslationScreen> {
                 Expanded(
                   child: DropdownButtonFormField<TranslationLanguage>(
                     initialValue: _source,
-                    decoration: const InputDecoration(labelText: 'Depuis'),
+                    decoration:
+                        InputDecoration(labelText: uiText(context, 'Depuis')),
                     items: languages
                         .map((item) => DropdownMenuItem(
                               value: item,
-                              child: Text(item.label),
+                              child: LocalizedText(item.label),
                             ))
                         .toList(),
                     onChanged: (value) {
@@ -6317,18 +6345,19 @@ class _TranslationScreenState extends State<TranslationScreen> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Inverser les langues',
+                  tooltip: uiText(context, 'Inverser les langues'),
                   onPressed: _swapLanguages,
                   icon: const Icon(Icons.swap_horiz),
                 ),
                 Expanded(
                   child: DropdownButtonFormField<TranslationLanguage>(
                     initialValue: _target,
-                    decoration: const InputDecoration(labelText: 'Vers'),
+                    decoration:
+                        InputDecoration(labelText: uiText(context, 'Vers')),
                     items: languages
                         .map((item) => DropdownMenuItem(
                               value: item,
-                              child: Text(item.label),
+                              child: LocalizedText(item.label),
                             ))
                         .toList(),
                     onChanged: (value) {
@@ -6344,9 +6373,10 @@ class _TranslationScreenState extends State<TranslationScreen> {
               minLines: 7,
               maxLines: 14,
               decoration: InputDecoration(
-                labelText: 'Texte à traduire',
+                labelText: uiText(context, 'Texte à traduire'),
                 alignLabelWithHint: true,
-                hintText: 'Écrivez, collez ou dictez le texte à traduire.',
+                hintText: uiText(
+                    context, 'Écrivez, collez ou dictez le texte à traduire.'),
                 suffixIcon: VoiceInputButton(controller: _sourceController),
               ),
             ),
@@ -6355,14 +6385,14 @@ class _TranslationScreenState extends State<TranslationScreen> {
               onPressed:
                   _speechInitializing ? null : _toggleTranslationDictation,
               icon: Icon(_speechListening ? Icons.stop_circle : Icons.mic),
-              label: Text(
+              label: LocalizedText(
                 _speechListening
                     ? 'Arrêter la dictée'
                     : 'Dicter le texte à traduire',
               ),
             ),
             const SizedBox(height: 8),
-            Text(_speechStatus),
+            LocalizedText(_speechStatus),
             const SizedBox(height: 14),
             FilledButton.icon(
               onPressed: _translating ? null : _translate,
@@ -6375,18 +6405,19 @@ class _TranslationScreenState extends State<TranslationScreen> {
                   : const Icon(Icons.translate),
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 15),
-                child: Text(_translating ? 'Traduction en cours…' : 'Traduire'),
+                child: LocalizedText(
+                    _translating ? 'Traduction en cours…' : 'Traduire'),
               ),
             ),
             const SizedBox(height: 12),
-            Text(_status),
+            LocalizedText(_status),
             const SizedBox(height: 16),
             TextField(
               controller: _resultController,
               minLines: 7,
               maxLines: 14,
               decoration: InputDecoration(
-                labelText: 'Traduction',
+                labelText: uiText(context, 'Traduction'),
                 alignLabelWithHint: true,
                 suffixIcon: VoiceInputButton(controller: _resultController),
               ),
@@ -6401,11 +6432,12 @@ class _TranslationScreenState extends State<TranslationScreen> {
                       );
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Traduction copiée')),
+                        const SnackBar(
+                            content: LocalizedText('Traduction copiée')),
                       );
                     },
               icon: const Icon(Icons.copy),
-              label: const Text('Copier la traduction'),
+              label: const LocalizedText('Copier la traduction'),
             ),
             const SizedBox(height: 18),
             const PrivacyCard(),
@@ -6765,7 +6797,7 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Questions sur le document')),
+        appBar: AppBar(title: const LocalizedText('Questions sur le document')),
         body: SafeArea(
           child: Column(
             children: [
@@ -6776,7 +6808,7 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(14),
-                        child: Text(widget.initialInsight.summary),
+                        child: LocalizedText(widget.initialInsight.summary),
                       ),
                     ),
                     Wrap(
@@ -6789,7 +6821,7 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
                         'Puis-je demander un délai ?',
                       ]
                           .map((text) => ActionChip(
-                                label: Text(text),
+                                label: LocalizedText(text),
                                 onPressed: () => _send(text),
                               ))
                           .toList(),
@@ -6812,7 +6844,7 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
                                     .surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(16),
                           ),
-                          child: Text(message['text'] ?? ''),
+                          child: LocalizedText(message['text'] ?? ''),
                         ),
                       );
                     }),
@@ -6838,7 +6870,8 @@ class _DocumentChatScreenState extends State<DocumentChatScreen> {
                   minLines: 1,
                   maxLines: 5,
                   decoration: InputDecoration(
-                    hintText: 'Posez une question sur le document…',
+                    hintText:
+                        uiText(context, 'Posez une question sur le document…'),
                     suffixIcon: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -7019,7 +7052,7 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Rédiger avec Gemini')),
+        appBar: AppBar(title: const LocalizedText('Rédiger avec Gemini')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
           Card(
               color: Theme.of(context).colorScheme.primaryContainer,
@@ -7032,20 +7065,20 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
                           Icon(Icons.auto_awesome_rounded),
                           SizedBox(width: 10),
                           Expanded(
-                              child: Text('Assistant de rédaction IA',
+                              child: LocalizedText('Assistant de rédaction IA',
                                   style: TextStyle(
                                       fontSize: 19,
                                       fontWeight: FontWeight.bold)))
                         ]),
                         SizedBox(height: 8),
-                        Text(
+                        LocalizedText(
                             'Décrivez votre situation. Gemini prépare un modèle professionnel que vous pourrez vérifier, compléter et modifier.'),
                       ]))),
           const SizedBox(height: 18),
           DropdownButtonFormField<String>(
             initialValue: domain,
-            decoration:
-                const InputDecoration(labelText: 'Domaine administratif'),
+            decoration: InputDecoration(
+                labelText: uiText(context, 'Domaine administratif')),
             items: const [
               'Assurance',
               'Banque',
@@ -7059,7 +7092,7 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
               'Télécommunications'
             ]
                 .map((value) =>
-                    DropdownMenuItem(value: value, child: Text(value)))
+                    DropdownMenuItem(value: value, child: LocalizedText(value)))
                 .toList(),
             onChanged: (value) {
               if (value != null) setState(() => domain = value);
@@ -7069,7 +7102,7 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
           TextField(
               controller: recipient,
               decoration: InputDecoration(
-                  labelText: 'Organisme ou destinataire',
+                  labelText: uiText(context, 'Organisme ou destinataire'),
                   prefixIcon: const Icon(Icons.business_outlined),
                   suffixIcon: VoiceInputButton(controller: recipient))),
           const SizedBox(height: 14),
@@ -7078,10 +7111,10 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
               minLines: 4,
               maxLines: 7,
               decoration: InputDecoration(
-                  labelText: 'Que souhaitez-vous demander ?',
+                  labelText: uiText(context, 'Que souhaitez-vous demander ?'),
                   alignLabelWithHint: true,
-                  hintText:
-                      'Exemple : résilier mon abonnement Internet à la suite de mon déménagement.',
+                  hintText: uiText(context,
+                      'Exemple : résilier mon abonnement Internet à la suite de mon déménagement.'),
                   suffixIcon: VoiceInputButton(controller: request))),
           const SizedBox(height: 14),
           TextField(
@@ -7089,17 +7122,18 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
               minLines: 4,
               maxLines: 8,
               decoration: InputDecoration(
-                  labelText: 'Informations utiles',
+                  labelText: uiText(context, 'Informations utiles'),
                   alignLabelWithHint: true,
-                  hintText:
-                      'Dates, démarches déjà effectuées, problème rencontré…',
+                  hintText: uiText(context,
+                      'Dates, démarches déjà effectuées, problème rencontré…'),
                   suffixIcon: VoiceInputButton(controller: contextDetails))),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
             initialValue: tone,
-            decoration: const InputDecoration(labelText: 'Ton de la lettre'),
+            decoration:
+                InputDecoration(labelText: uiText(context, 'Ton de la lettre')),
             items: const ['Courtois', 'Professionnel', 'Ferme']
-                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                .map((e) => DropdownMenuItem(value: e, child: LocalizedText(e)))
                 .toList(),
             onChanged: (value) {
               if (value != null) setState(() => tone = value);
@@ -7110,7 +7144,8 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
             Card(
                 color: Theme.of(context).colorScheme.errorContainer,
                 child: Padding(
-                    padding: const EdgeInsets.all(14), child: Text(error!))),
+                    padding: const EdgeInsets.all(14),
+                    child: LocalizedText(error!))),
           ],
           const SizedBox(height: 20),
           FilledButton.icon(
@@ -7123,12 +7158,12 @@ class _GeminiLetterWriterScreenState extends State<GeminiLetterWriterScreen> {
                 : const Icon(Icons.auto_awesome_rounded),
             label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 15),
-                child: Text(loading
+                child: LocalizedText(loading
                     ? 'Gemini rédige la lettre…'
                     : 'Générer la lettre avec Gemini')),
           ),
           const SizedBox(height: 12),
-          Text(
+          LocalizedText(
               'Vérifiez toujours le contenu avant l’envoi. Le texte saisi est transmis à Gemini pour générer la lettre.',
               style: Theme.of(context).textTheme.bodySmall),
         ]),
@@ -7298,7 +7333,7 @@ class OfficialSignatureBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Signature de l’expéditeur',
+          const LocalizedText('Signature de l’expéditeur',
               style: TextStyle(color: Colors.black87, fontSize: 13)),
           const SizedBox(height: 5),
           Container(
@@ -7318,12 +7353,12 @@ class OfficialSignatureBlock extends StatelessWidget {
                     width: 95,
                     height: 45,
                     fit: BoxFit.contain)
-                : const Text('Signature à apposer',
+                : const LocalizedText('Signature à apposer',
                     style: TextStyle(color: Colors.black54, fontSize: 12)),
           ),
           const SizedBox(height: 4),
           if (senderName.trim().isNotEmpty)
-            Text(capitalizeProfileName(senderName),
+            LocalizedText(capitalizeProfileName(senderName),
                 style: const TextStyle(color: Colors.black, fontSize: 13)),
         ],
       ),
@@ -7366,8 +7401,8 @@ class LetterSignatureOption extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         value: value,
         onChanged: onChanged,
-        title: const Text('Ajouter ma signature à cette lettre'),
-        subtitle: Text(settings.hasSignature
+        title: const LocalizedText('Ajouter ma signature à cette lettre'),
+        subtitle: LocalizedText(settings.hasSignature
             ? 'La signature apparaîtra au-dessus du nom de l’expéditeur.'
             : 'Aucune signature enregistrée dans le Profil.'),
         secondary: settings.hasSignature
@@ -7629,7 +7664,7 @@ class _GeminiLetterWriterV156ScreenState
     if (!mounted) return;
     setState(() => saved = true);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Lettre enregistrée dans Mes démarches.'),
+      content: LocalizedText('Lettre enregistrée dans Mes démarches.'),
     ));
   }
 
@@ -7658,7 +7693,7 @@ class _GeminiLetterWriterV156ScreenState
     );
     if (path != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lettre exportée en PDF.')),
+        const SnackBar(content: LocalizedText('Lettre exportée en PDF.')),
       );
     }
   }
@@ -7680,7 +7715,7 @@ class _GeminiLetterWriterV156ScreenState
       minLines: lines,
       maxLines: lines == 1 ? 3 : lines + 4,
       decoration: InputDecoration(
-        labelText: label,
+        labelText: uiText(context, label),
         alignLabelWithHint: lines > 1,
         suffixIcon: VoiceInputButton(controller: controller),
       ),
@@ -7689,13 +7724,13 @@ class _GeminiLetterWriterV156ScreenState
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Rédiger avec Gemini')),
+        appBar: AppBar(title: const LocalizedText('Rédiger avec Gemini')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
           Card(
             child: ListTile(
               leading: const Icon(Icons.auto_awesome_rounded),
-              title: Text(status, key: const Key('gemini-status')),
-              subtitle: Text(GeminiLetterWriter.isConfigured
+              title: LocalizedText(status, key: const Key('gemini-status')),
+              subtitle: LocalizedText(GeminiLetterWriter.isConfigured
                   ? 'Gemini disponible'
                   : 'Mode local disponible'),
             ),
@@ -7704,11 +7739,12 @@ class _GeminiLetterWriterV156ScreenState
           DropdownButtonFormField<GeminiLetterTypeV156>(
             key: const Key('letter-type'),
             initialValue: type,
-            decoration: const InputDecoration(labelText: 'Type de courrier'),
+            decoration:
+                InputDecoration(labelText: uiText(context, 'Type de courrier')),
             items: GeminiLetterTypeV156.values
                 .map((item) => DropdownMenuItem(
                       value: item,
-                      child: Text(item.label),
+                      child: LocalizedText(item.label),
                     ))
                 .toList(),
             onChanged: (value) {
@@ -7719,11 +7755,11 @@ class _GeminiLetterWriterV156ScreenState
           DropdownButtonFormField<LetterFormatV1561>(
             key: const Key('letter-format'),
             initialValue: format,
-            decoration: const InputDecoration(labelText: 'Format'),
+            decoration: InputDecoration(labelText: uiText(context, 'Format')),
             items: LetterFormatV1561.values
                 .map((item) => DropdownMenuItem(
                       value: item,
-                      child: Text(item.label),
+                      child: LocalizedText(item.label),
                     ))
                 .toList(),
             onChanged: (value) {
@@ -7734,11 +7770,11 @@ class _GeminiLetterWriterV156ScreenState
           DropdownButtonFormField<GeminiLetterToneV156>(
             key: const Key('letter-tone'),
             initialValue: tone,
-            decoration: const InputDecoration(labelText: 'Ton'),
+            decoration: InputDecoration(labelText: uiText(context, 'Ton')),
             items: GeminiLetterToneV156.values
                 .map((item) => DropdownMenuItem(
                       value: item,
-                      child: Text(item.label),
+                      child: LocalizedText(item.label),
                     ))
                 .toList(),
             onChanged: (value) {
@@ -7757,7 +7793,7 @@ class _GeminiLetterWriterV156ScreenState
           _field(information, 'Informations importantes à intégrer', lines: 3),
           if (error != null) ...[
             const SizedBox(height: 12),
-            Text(error!,
+            LocalizedText(error!,
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ],
           const SizedBox(height: 8),
@@ -7777,11 +7813,11 @@ class _GeminiLetterWriterV156ScreenState
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.auto_awesome_rounded),
-            label: const Text('Générer la lettre'),
+            label: const LocalizedText('Générer la lettre'),
           ),
           if (letter.text.trim().isNotEmpty) ...[
             const SizedBox(height: 20),
-            Text('Lettre générée (modifiable)',
+            LocalizedText('Lettre générée (modifiable)',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
             OfficialLetterSheet(
@@ -7802,7 +7838,7 @@ class _GeminiLetterWriterV156ScreenState
                     if (saved) setState(() => saved = false);
                   },
                   decoration: InputDecoration(
-                    hintText: 'Votre courrier',
+                    hintText: uiText(context, 'Votre courrier'),
                     hintStyle: const TextStyle(color: Colors.black54),
                     suffixIcon: VoiceInputButton(controller: letter),
                   ),
@@ -7829,11 +7865,11 @@ class _GeminiLetterWriterV156ScreenState
                 'Simplifier',
               ])
                 ActionChip(
-                  label: Text(action),
+                  label: LocalizedText(action),
                   onPressed: loading ? null : () => _transform(action),
                 ),
               ActionChip(
-                label: const Text('Régénérer'),
+                label: const LocalizedText('Régénérer'),
                 onPressed: loading ? null : _generate,
               ),
             ]),
@@ -7842,7 +7878,7 @@ class _GeminiLetterWriterV156ScreenState
               key: const Key('save-procedure'),
               onPressed: saved ? null : _saveProcedure,
               icon: const Icon(Icons.folder_copy_outlined),
-              label: Text(saved
+              label: LocalizedText(saved
                   ? 'Enregistrée dans Mes démarches'
                   : 'Enregistrer dans Mes démarches'),
             ),
@@ -7852,7 +7888,7 @@ class _GeminiLetterWriterV156ScreenState
                 child: OutlinedButton.icon(
                   onPressed: _exportPdf,
                   icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('Exporter en PDF'),
+                  label: const LocalizedText('Exporter en PDF'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -7860,13 +7896,13 @@ class _GeminiLetterWriterV156ScreenState
                 child: OutlinedButton.icon(
                   onPressed: _share,
                   icon: const Icon(Icons.share_outlined),
-                  label: const Text('Transmettre'),
+                  label: const LocalizedText('Transmettre'),
                 ),
               ),
             ]),
           ],
           const SizedBox(height: 12),
-          Text(
+          LocalizedText(
             'La lettre reste locale et n’est jamais envoyée automatiquement vers Supabase.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
@@ -8362,7 +8398,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 Icon(icon),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
+                  child: LocalizedText(
                     title,
                     style: Theme.of(context)
                         .textTheme
@@ -8379,11 +8415,11 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
       );
 
   Widget chips(List<String> values, String empty) => values.isEmpty
-      ? Text(empty)
+      ? LocalizedText(empty)
       : Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: values.map((e) => Chip(label: Text(e))).toList(),
+          children: values.map((e) => Chip(label: LocalizedText(e))).toList(),
         );
 
   Widget _amountBreakdown() {
@@ -8398,9 +8434,9 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: Text(item.label)),
+                    Expanded(child: LocalizedText(item.label)),
                     const SizedBox(width: 12),
-                    Text(item.amount,
+                    LocalizedText(item.amount,
                         style: const TextStyle(fontWeight: FontWeight.w800)),
                   ],
                 ),
@@ -8419,7 +8455,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 const Icon(Icons.receipt_long_rounded),
                 const SizedBox(width: 10),
                 Expanded(
-                    child: Text(
+                    child: LocalizedText(
                   insight.category.isEmpty ? 'Facture' : insight.category,
                   style: Theme.of(context)
                       .textTheme
@@ -8430,17 +8466,17 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
               const SizedBox(height: 10),
               if (insight.supplier.isNotEmpty ||
                   insight.organisation != 'Non identifiée')
-                Text(
+                LocalizedText(
                     'Fournisseur : ${insight.supplier.isNotEmpty ? insight.supplier : insight.organisation}'),
               if (insight.billingPeriod.isNotEmpty)
-                Text('Période : ${insight.billingPeriod}'),
+                LocalizedText('Période : ${insight.billingPeriod}'),
               if (insight.dueDate.isNotEmpty)
-                Text('Échéance : ${insight.dueDate}'),
+                LocalizedText('Échéance : ${insight.dueDate}'),
               const Divider(height: 28),
               _amountBreakdown(),
               if (insight.summary.isNotEmpty) ...[
                 const Divider(height: 28),
-                Text(insight.summary),
+                LocalizedText(insight.summary),
               ],
             ],
           ),
@@ -8460,7 +8496,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   children: [
                     Icon(icon, size: 20),
                     const SizedBox(width: 9),
-                    Expanded(child: Text(value)),
+                    Expanded(child: LocalizedText(value)),
                   ],
                 ),
               ),
@@ -8475,7 +8511,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
             contentPadding: EdgeInsets.zero,
             value: checked,
             controlAffinity: ListTileControlAffinity.leading,
-            title: Text(
+            title: LocalizedText(
               insight.actions[index],
               style: checked
                   ? const TextStyle(decoration: TextDecoration.lineThrough)
@@ -8548,7 +8584,8 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
     if (!mounted) return;
     setState(() => addedToProcedures = true);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Démarche ajoutée à Mes démarches.')),
+      const SnackBar(
+          content: LocalizedText('Démarche ajoutée à Mes démarches.')),
     );
   }
 
@@ -8567,7 +8604,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
     setState(() => reminderDate = selected);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
+        content: LocalizedText(
           'Rappel prévu le ${selected.day.toString().padLeft(2, '0')}/'
           '${selected.month.toString().padLeft(2, '0')}/${selected.year}.',
         ),
@@ -8592,7 +8629,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
     await Clipboard.setData(ClipboardData(text: _analysisReport()));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Analyse copiée')),
+      const SnackBar(content: LocalizedText('Analyse copiée')),
     );
   }
 
@@ -8608,10 +8645,10 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Assistant IA Premium'),
+          title: const LocalizedText('Assistant IA Premium'),
           actions: [
             IconButton(
-              tooltip: 'Partager l’analyse',
+              tooltip: uiText(context, 'Partager l’analyse'),
               onPressed: _shareAnalysis,
               icon: const Icon(Icons.share_outlined),
             ),
@@ -8641,7 +8678,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        LocalizedText(
                           'Priorité : ${insight.priority}',
                           style: Theme.of(context)
                               .textTheme
@@ -8649,7 +8686,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 4),
-                        Text(
+                        LocalizedText(
                           insight.priority == 'Urgent'
                               ? 'Une action rapide semble nécessaire.'
                               : insight.priority == 'Important'
@@ -8669,7 +8706,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                     aiUsed ? Icons.cloud_done_outlined : Icons.phone_android,
                     size: 18,
                   ),
-                  label: Text(
+                  label: LocalizedText(
                     aiUsed
                         ? 'Analyse Gemini Flash-Lite'
                         : 'Analyse locale provisoire',
@@ -8684,7 +8721,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   onPressed: () => setState(() => showDetails = !showDetails),
                   icon:
                       Icon(showDetails ? Icons.expand_less : Icons.expand_more),
-                  label: Text(showDetails
+                  label: LocalizedText(showDetails
                       ? 'Masquer les détails'
                       : 'Voir plus de détails'),
                 ),
@@ -8701,7 +8738,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                           const Icon(Icons.task_alt_rounded),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(
+                            child: LocalizedText(
                               'Préparation du dossier : $_completionScore %',
                               style: Theme.of(context)
                                   .textTheme
@@ -8713,7 +8750,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                         const SizedBox(height: 12),
                         LinearProgressIndicator(value: _completionScore / 100),
                         const SizedBox(height: 8),
-                        Text(
+                        LocalizedText(
                           _completionScore >= 80
                               ? 'Votre dossier semble presque prêt.'
                               : 'Cochez les actions réalisées et programmez un rappel.',
@@ -8727,7 +8764,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   context,
                   Icons.summarize_outlined,
                   'Résumé du document',
-                  Text(insight.summary),
+                  LocalizedText(insight.summary),
                 ),
               if (!insight.isInvoice || showDetails)
                 Card(
@@ -8740,7 +8777,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                           const Icon(Icons.lightbulb_outline_rounded),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(
+                            child: LocalizedText(
                               'Explication en langage simple',
                               style: Theme.of(context)
                                   .textTheme
@@ -8769,7 +8806,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                                             strokeWidth: 2),
                                       )
                                     : const Icon(Icons.auto_awesome),
-                                label: Text(
+                                label: LocalizedText(
                                   aiLoading
                                       ? 'Analyse Gemini en cours…'
                                       : 'Expliquer simplement avec Gemini',
@@ -8777,14 +8814,14 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                               ),
                               if (!GeminiDocumentAnalyzer.isConfigured) ...[
                                 const SizedBox(height: 8),
-                                const Text(
+                                const LocalizedText(
                                   geminiUnavailableMessage,
                                   style: TextStyle(fontSize: 12),
                                 ),
                               ],
                               if (aiError != null) ...[
                                 const SizedBox(height: 10),
-                                Text(
+                                LocalizedText(
                                   aiError!,
                                   style: TextStyle(
                                     color: Theme.of(context).colorScheme.error,
@@ -8796,7 +8833,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                                   onPressed:
                                       aiLoading ? null : _explainWithGemini,
                                   icon: const Icon(Icons.refresh),
-                                  label: const Text('Réessayer'),
+                                  label: const LocalizedText('Réessayer'),
                                 ),
                               ],
                             ],
@@ -8804,14 +8841,15 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                           secondChild: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(_simpleExplanation),
+                              LocalizedText(_simpleExplanation),
                               const SizedBox(height: 10),
                               TextButton.icon(
                                 onPressed: () => setState(
                                   () => showSimpleExplanation = false,
                                 ),
                                 icon: const Icon(Icons.visibility_off_outlined),
-                                label: const Text('Masquer l’explication'),
+                                label: const LocalizedText(
+                                    'Masquer l’explication'),
                               ),
                             ],
                           ),
@@ -8825,7 +8863,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   context,
                   Icons.account_balance_outlined,
                   'Document identifié',
-                  Text(
+                  LocalizedText(
                     'Organisme : ${insight.organisation}\n'
                     'Catégorie : ${insight.category}',
                   ),
@@ -8891,7 +8929,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 icon: const Icon(Icons.chat_bubble_outline_rounded),
                 label: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 14),
-                  child: Text('Poser une question sur ce document'),
+                  child: LocalizedText('Poser une question sur ce document'),
                 ),
               ),
               const SizedBox(height: 10),
@@ -8907,7 +8945,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 icon: const Icon(Icons.edit_note_rounded),
                 label: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 15),
-                  child: Text('Générer une réponse adaptée'),
+                  child: LocalizedText('Générer une réponse adaptée'),
                 ),
               ),
               const SizedBox(height: 10),
@@ -8916,7 +8954,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 icon: const Icon(Icons.alarm_add_outlined),
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 13),
-                  child: Text(
+                  child: LocalizedText(
                     reminderDate == null
                         ? 'Programmer un rappel'
                         : 'Rappel : ${reminderDate!.day.toString().padLeft(2, '0')}/'
@@ -8933,7 +8971,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                 ),
                 label: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 13),
-                  child: Text(
+                  child: LocalizedText(
                     addedToProcedures
                         ? 'Ajouté à Mes démarches'
                         : 'Ajouter à Mes démarches',
@@ -8946,7 +8984,7 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _copyAnalysis,
                     icon: const Icon(Icons.copy_all_outlined),
-                    label: const Text('Copier'),
+                    label: const LocalizedText('Copier'),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -8954,12 +8992,12 @@ class _SmartAnalysisScreenState extends State<SmartAnalysisScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _shareAnalysis,
                     icon: const Icon(Icons.share_outlined),
-                    label: const Text('Partager'),
+                    label: const LocalizedText('Partager'),
                   ),
                 ),
               ]),
               const SizedBox(height: 14),
-              Text(
+              LocalizedText(
                 'Analyse locale indicative : vérifiez toujours les dates, '
                 'montants, références et obligations avant d’envoyer une réponse.',
                 style: Theme.of(context).textTheme.bodySmall,
@@ -9037,7 +9075,7 @@ class _ReplyScreenState extends State<ReplyScreen> {
           if (!mounted) return;
           setState(() => _listening = false);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Microphone : ${error.errorMsg}')),
+            SnackBar(content: LocalizedText('Microphone : ${error.errorMsg}')),
           );
         },
       );
@@ -9073,7 +9111,8 @@ class _ReplyScreenState extends State<ReplyScreen> {
       if (!_speechAvailable && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('La reconnaissance vocale n’est pas disponible.'),
+            content:
+                LocalizedText('La reconnaissance vocale n’est pas disponible.'),
           ),
         );
       }
@@ -9181,9 +9220,9 @@ Cordialement,''';
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Réponse assistée • V3.1')),
+        appBar: AppBar(title: const LocalizedText('Réponse assistée • V3.1')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
-          const Text(
+          const LocalizedText(
             'Quelle réponse souhaitez-vous envoyer ?',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
@@ -9195,7 +9234,7 @@ Cordialement,''';
               return ChoiceChip(
                 selected: intent == item,
                 avatar: Icon(item.icon, size: 20),
-                label: Text(item.label),
+                label: LocalizedText(item.label),
                 onSelected: (_) => setState(() => intent = item),
               );
             }).toList(),
@@ -9204,8 +9243,8 @@ Cordialement,''';
           TextField(
             controller: details,
             maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Précisions facultatives',
+            decoration: InputDecoration(
+              labelText: uiText(context, 'Précisions facultatives'),
               alignLabelWithHint: true,
             ),
           ),
@@ -9215,7 +9254,7 @@ Cordialement,''';
             icon: const Icon(Icons.auto_awesome),
             label: const Padding(
               padding: EdgeInsets.symmetric(vertical: 14),
-              child: Text('Générer la réponse'),
+              child: LocalizedText('Générer la réponse'),
             ),
           ),
           const SizedBox(height: 18),
@@ -9225,11 +9264,15 @@ Cordialement,''';
             maxLines: 18,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              labelText: 'Votre réponse',
+              labelText: uiText(context, 'Votre réponse'),
               alignLabelWithHint: true,
-              hintText: 'Écrivez votre réponse ou utilisez le microphone.',
+              hintText: uiText(
+                  context, 'Écrivez votre réponse ou utilisez le microphone.'),
               suffixIcon: IconButton(
-                tooltip: _listening ? 'Arrêter la dictée' : 'Dicter la réponse',
+                tooltip: uiText(
+                  context,
+                  _listening ? 'Arrêter la dictée' : 'Dicter la réponse',
+                ),
                 onPressed: _initializingSpeech ? null : _toggleReplyDictation,
                 icon: Icon(_listening ? Icons.stop_circle : Icons.mic),
               ),
@@ -9239,7 +9282,7 @@ Cordialement,''';
           FilledButton.tonalIcon(
             onPressed: _initializingSpeech ? null : _toggleReplyDictation,
             icon: Icon(_listening ? Icons.stop_circle : Icons.mic_none),
-            label: Text(
+            label: LocalizedText(
               _listening ? 'Arrêter la dictée' : 'Dicter ma réponse',
             ),
           ),
@@ -9250,7 +9293,7 @@ Cordialement,''';
             onChanged: (value) => setState(() => addSignature = value),
           ),
           const SizedBox(height: 12),
-          const Text('Envoyer ou conserver',
+          const LocalizedText('Envoyer ou conserver',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
           Wrap(spacing: 10, runSpacing: 10, children: [
@@ -9259,15 +9302,15 @@ Cordialement,''';
                     ? null
                     : () => _shareReply(email: true),
                 icon: const Icon(Icons.email_outlined),
-                label: const Text('E-mail')),
+                label: const LocalizedText('E-mail')),
             FilledButton.tonalIcon(
                 onPressed: draft.text.trim().isEmpty ? null : _shareReply,
                 icon: const Icon(Icons.send_outlined),
-                label: const Text('Transmettre')),
+                label: const LocalizedText('Transmettre')),
             FilledButton.tonalIcon(
                 onPressed: draft.text.trim().isEmpty ? null : _printReply,
                 icon: const Icon(Icons.print_outlined),
-                label: const Text('Imprimer')),
+                label: const LocalizedText('Imprimer')),
             OutlinedButton.icon(
                 onPressed: draft.text.trim().isEmpty
                     ? null
@@ -9276,13 +9319,14 @@ Cordialement,''';
                             ClipboardData(text: draft.text));
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Réponse copiée')));
+                            const SnackBar(
+                                content: LocalizedText('Réponse copiée')));
                       },
                 icon: const Icon(Icons.copy),
-                label: const Text('Copier')),
+                label: const LocalizedText('Copier')),
           ]),
           const SizedBox(height: 18),
-          const Text(
+          const LocalizedText(
             'Modèle général : vérifiez toujours les dates, montants, références et obligations du courrier original.',
           ),
         ]),
@@ -9502,7 +9546,7 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
     }, onError: (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Microphone : ${error.errorMsg}')));
+            SnackBar(content: LocalizedText('Microphone : ${error.errorMsg}')));
       }
     });
     if (ok) {
@@ -9548,7 +9592,8 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
     final text = controller.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Décrivez d’abord votre problème.')),
+        const SnackBar(
+            content: LocalizedText('Décrivez d’abord votre problème.')),
       );
       return;
     }
@@ -9571,12 +9616,13 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Assistant administratif • V7.0')),
+        appBar: AppBar(
+            title: const LocalizedText('Assistant administratif • V7.0')),
         body: ListView(padding: const EdgeInsets.all(20), children: [
-          const Text('Expliquez naturellement votre besoin',
+          const LocalizedText('Expliquez naturellement votre besoin',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          const Text(
+          const LocalizedText(
               'Exemples : « résilier Orange », « contester une facture EDF », « préavis logement » ou « remboursement CPAM ».'),
           const SizedBox(height: 16),
           TextField(
@@ -9584,7 +9630,7 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
               minLines: 8,
               maxLines: 14,
               decoration: InputDecoration(
-                  labelText: 'Votre problème',
+                  labelText: uiText(context, 'Votre problème'),
                   alignLabelWithHint: true,
                   suffixIcon: IconButton(
                       onPressed: _toggle,
@@ -9593,7 +9639,7 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
           FilledButton.tonalIcon(
               onPressed: _toggle,
               icon: Icon(listening ? Icons.stop_circle : Icons.mic),
-              label: Text(
+              label: LocalizedText(
                   listening ? 'Arrêter la dictée' : 'Décrire avec le micro')),
           const SizedBox(height: 18),
           FilledButton.icon(
@@ -9601,7 +9647,7 @@ class _ProblemDescriptionScreenState extends State<ProblemDescriptionScreen> {
               icon: const Icon(Icons.auto_awesome),
               label: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 14),
-                  child: Text('Afficher les meilleures lettres'))),
+                  child: LocalizedText('Afficher les meilleures lettres'))),
         ]),
       );
 }
@@ -9783,15 +9829,15 @@ class _AssistantSuggestionsScreenState
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Lettres recommandées')),
+        appBar: AppBar(title: const LocalizedText('Lettres recommandées')),
         body: loading
             ? const Center(child: CircularProgressIndicator())
             : error != null
-                ? Center(child: Text('Recherche impossible : $error'))
+                ? Center(child: LocalizedText('Recherche impossible : $error'))
                 : ListView(
                     padding: const EdgeInsets.all(18),
                     children: [
-                      Text(
+                      LocalizedText(
                         'Votre demande',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
@@ -9799,11 +9845,11 @@ class _AssistantSuggestionsScreenState
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
-                          child: Text(widget.request),
+                          child: LocalizedText(widget.request),
                         ),
                       ),
                       const SizedBox(height: 18),
-                      Text(
+                      LocalizedText(
                         'Les 5 courriers les plus adaptés',
                         style:
                             Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -9811,7 +9857,7 @@ class _AssistantSuggestionsScreenState
                                 ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      const LocalizedText(
                         'Vérifiez le titre et l’objet avant de personnaliser la lettre.',
                       ),
                       const SizedBox(height: 12),
@@ -9819,7 +9865,7 @@ class _AssistantSuggestionsScreenState
                         const Card(
                           child: Padding(
                             padding: EdgeInsets.all(16),
-                            child: Text(
+                            child: LocalizedText(
                               'Aucun courrier suffisamment pertinent n’a été trouvé. '
                               'Précisez l’organisme et l’action, par exemple : « résilier box Orange ».',
                             ),
@@ -9837,13 +9883,14 @@ class _AssistantSuggestionsScreenState
                         return Card(
                           child: ListTile(
                             minVerticalPadding: 14,
-                            leading: CircleAvatar(child: Text('${index + 1}')),
-                            title: Text(
+                            leading: CircleAvatar(
+                                child: LocalizedText('${index + 1}')),
+                            title: LocalizedText(
                               record.title,
                               style:
                                   const TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            subtitle: Text(
+                            subtitle: LocalizedText(
                               '$confidence • ${record.category} • ${record.subcategory}\n${record.subject}',
                               maxLines: 4,
                               overflow: TextOverflow.ellipsis,
@@ -10829,36 +10876,39 @@ class _LetterModelDetailScreenState extends State<LetterModelDetailScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         key: Key('model-detail-${widget.record.id}'),
-        appBar: AppBar(title: const Text('Aperçu du modèle')),
+        appBar: AppBar(title: const LocalizedText('Aperçu du modèle')),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(18),
             children: [
-              Text(widget.record.title,
+              LocalizedText(widget.record.title,
                   style: Theme.of(context)
                       .textTheme
                       .headlineSmall
                       ?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('${widget.record.category} • ${widget.record.subcategory}'),
+              LocalizedText(
+                  '${widget.record.category} • ${widget.record.subcategory}'),
               if (widget.record.organisation.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text('Organisme : ${widget.record.organisation}'),
+                LocalizedText('Organisme : ${widget.record.organisation}'),
               ],
               const SizedBox(height: 18),
-              Text('Objet', style: Theme.of(context).textTheme.titleMedium),
+              LocalizedText('Objet',
+                  style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 5),
-              Text(widget.record.subject),
+              LocalizedText(widget.record.subject),
               const SizedBox(height: 18),
-              Text('Aperçu', style: Theme.of(context).textTheme.titleMedium),
+              LocalizedText('Aperçu',
+                  style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 5),
-              Text(widget.record.body),
+              LocalizedText(widget.record.body),
               if (widget.record.fields.isNotEmpty) ...[
                 const SizedBox(height: 18),
-                Text('Champs à compléter',
+                LocalizedText('Champs à compléter',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 5),
-                Text(widget.record.fields.join(' • ')),
+                LocalizedText(widget.record.fields.join(' • ')),
               ],
               const SizedBox(height: 24),
               FilledButton.icon(
@@ -10867,7 +10917,7 @@ class _LetterModelDetailScreenState extends State<LetterModelDetailScreen> {
                 icon: const Icon(Icons.edit_note_rounded),
                 label: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 14),
-                  child: Text('Utiliser ce modèle'),
+                  child: LocalizedText('Utiliser ce modèle'),
                 ),
               ),
             ],
@@ -10999,12 +11049,14 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
   Widget build(BuildContext context) {
     final items = filtered;
     return Scaffold(
-      appBar: AppBar(title: const Text('Bibliothèque professionnelle V6.7')),
+      appBar: AppBar(
+          title: const LocalizedText('Bibliothèque professionnelle V6.7')),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
               ? Center(
-                  child: Text('Impossible de charger la bibliothèque : $error'))
+                  child: LocalizedText(
+                      'Impossible de charger la bibliothèque : $error'))
               : Column(
                   children: [
                     Padding(
@@ -11013,10 +11065,10 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                         controller: controller,
                         decoration: InputDecoration(
                           prefixIcon: const Icon(Icons.search),
-                          labelText:
-                              'Rechercher parmi ${records.length} modèles',
-                          hintText:
-                              'Ex. résiliation Orange, facture EDF, préavis…',
+                          labelText: uiText(context,
+                              'Rechercher parmi ${records.length} modèles'),
+                          hintText: uiText(context,
+                              'Ex. résiliation Orange, facture EDF, préavis…'),
                           suffixIcon: controller.text.isEmpty
                               ? null
                               : IconButton(
@@ -11033,7 +11085,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         children: [
                           ChoiceChip(
-                            label: const Text('Tous'),
+                            label: const LocalizedText('Tous'),
                             selected: !favoritesOnly && !recentOnly,
                             onSelected: (_) => setState(() {
                               favoritesOnly = false;
@@ -11043,7 +11095,8 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                           const SizedBox(width: 8),
                           ChoiceChip(
                             avatar: const Icon(Icons.star, size: 18),
-                            label: Text('Favoris (${favorites.length})'),
+                            label:
+                                LocalizedText('Favoris (${favorites.length})'),
                             selected: favoritesOnly,
                             onSelected: (_) => setState(() {
                               favoritesOnly = true;
@@ -11053,7 +11106,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                           const SizedBox(width: 8),
                           ChoiceChip(
                             avatar: const Icon(Icons.history, size: 18),
-                            label: Text('Récents (${history.length})'),
+                            label: LocalizedText('Récents (${history.length})'),
                             selected: recentOnly,
                             onSelected: (_) => setState(() {
                               recentOnly = true;
@@ -11071,7 +11124,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         children: [
                           ChoiceChip(
-                            label: const Text('Toutes catégories'),
+                            label: const LocalizedText('Toutes catégories'),
                             selected: category == null,
                             onSelected: (_) => setState(() {
                               category = null;
@@ -11081,7 +11134,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                           const SizedBox(width: 8),
                           ...categories.expand((c) => [
                                 ChoiceChip(
-                                  label: Text(c),
+                                  label: LocalizedText(c),
                                   selected: category == c,
                                   onSelected: (_) => setState(() {
                                     category = c;
@@ -11101,7 +11154,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           children: [
                             ChoiceChip(
-                              label: const Text('Toutes les demandes'),
+                              label: const LocalizedText('Toutes les demandes'),
                               selected: subcategory == null,
                               onSelected: (_) =>
                                   setState(() => subcategory = null),
@@ -11109,7 +11162,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                             const SizedBox(width: 8),
                             ...subcategories.expand((s) => [
                                   ChoiceChip(
-                                    label: Text(s),
+                                    label: LocalizedText(s),
                                     selected: subcategory == s,
                                     onSelected: (_) =>
                                         setState(() => subcategory = s),
@@ -11124,32 +11177,35 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                       child: Column(children: [
                         Row(children: [
                           Expanded(
-                            child: Text(
+                            child: LocalizedText(
                               '${items.length} courrier${items.length > 1 ? 's' : ''} '
                               'sur ${records.length}',
                             ),
                           ),
-                          const Tooltip(
-                            message:
-                                'Les modèles sont disponibles même sans connexion Internet.',
-                            child: Icon(Icons.offline_bolt_outlined, size: 18),
+                          Tooltip(
+                            message: uiText(context,
+                                'Les modèles sont disponibles même sans connexion Internet.'),
+                            child: const Icon(Icons.offline_bolt_outlined,
+                                size: 18),
                           ),
                           const SizedBox(width: 6),
                           const Flexible(
-                              child: Text('Disponible hors connexion')),
+                              child:
+                                  LocalizedText('Disponible hors connexion')),
                         ]),
                         const SizedBox(height: 7),
                         Wrap(spacing: 8, runSpacing: 6, children: [
                           Chip(
                             avatar: Icon(Icons.auto_awesome_outlined, size: 16),
-                            label: Text(GeminiDocumentAnalyzer.isConfigured
-                                ? 'Gemini connecté'
-                                : 'Gemini indisponible'),
+                            label: LocalizedText(
+                                GeminiDocumentAnalyzer.isConfigured
+                                    ? 'Gemini connecté'
+                                    : 'Gemini indisponible'),
                             visualDensity: VisualDensity.compact,
                           ),
                           Chip(
                             avatar: Icon(Icons.cloud_outlined, size: 16),
-                            label: Text(_supabaseReady
+                            label: LocalizedText(_supabaseReady
                                 ? 'Supabase synchronisé'
                                 : 'Supabase indisponible'),
                             visualDensity: VisualDensity.compact,
@@ -11162,7 +11218,7 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                           ? const Center(
                               child: Padding(
                                 padding: EdgeInsets.all(28),
-                                child: Text(
+                                child: LocalizedText(
                                   'Aucun courrier ne correspond à ces filtres. '
                                   'Essayez un mot plus simple ou affichez tous les modèles.',
                                   textAlign: TextAlign.center,
@@ -11182,22 +11238,25 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                                     ListTile(
                                       minVerticalPadding: 12,
                                       leading: CircleAvatar(
-                                        child: Text(
+                                        child: LocalizedText(
                                             item.category.characters.first),
                                       ),
-                                      title: Text(item.title,
+                                      title: LocalizedText(item.title,
                                           style: const TextStyle(
                                               fontWeight: FontWeight.w600)),
-                                      subtitle: Text(
+                                      subtitle: LocalizedText(
                                         '${item.category} • ${item.subcategory}\n${item.description}',
                                         maxLines: 3,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       isThreeLine: true,
                                       trailing: IconButton(
-                                        tooltip: favorite
-                                            ? 'Retirer des favoris'
-                                            : 'Ajouter aux favoris',
+                                        tooltip: uiText(
+                                          context,
+                                          favorite
+                                              ? 'Retirer des favoris'
+                                              : 'Ajouter aux favoris',
+                                        ),
                                         onPressed: () =>
                                             _toggleFavorite(item.id),
                                         icon: Icon(favorite
@@ -11213,8 +11272,8 @@ class _JsonLibraryScreenState extends State<JsonLibraryScreen> {
                                         width: double.infinity,
                                         child: FilledButton.tonal(
                                           onPressed: () => _openRecord(item),
-                                          child:
-                                              const Text('Utiliser ce modèle'),
+                                          child: const LocalizedText(
+                                              'Utiliser ce modèle'),
                                         ),
                                       ),
                                     ),
@@ -11304,7 +11363,7 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
   Widget build(BuildContext context) {
     final items = results;
     return Scaffold(
-      appBar: AppBar(title: const Text('Recherche de courriers')),
+      appBar: AppBar(title: const LocalizedText('Recherche de courriers')),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -11313,8 +11372,9 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
             autofocus: true,
             decoration: InputDecoration(
               prefixIcon: const Icon(Icons.search),
-              labelText: 'Votre besoin ou un organisme',
-              hintText: 'Ex. résiliation mobile, CAF, facture EDF…',
+              labelText: uiText(context, 'Votre besoin ou un organisme'),
+              hintText:
+                  uiText(context, 'Ex. résiliation mobile, CAF, facture EDF…'),
               suffixIcon: controller.text.isEmpty
                   ? null
                   : IconButton(
@@ -11327,14 +11387,14 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(children: [
             ChoiceChip(
-              label: const Text('Tous les modèles'),
+              label: const LocalizedText('Tous les modèles'),
               selected: !favoritesOnly,
               onSelected: (_) => setState(() => favoritesOnly = false),
             ),
             const SizedBox(width: 10),
             ChoiceChip(
               avatar: const Icon(Icons.star, size: 18),
-              label: Text('Favoris (${favorites.length})'),
+              label: LocalizedText('Favoris (${favorites.length})'),
               selected: favoritesOnly,
               onSelected: (_) => setState(() => favoritesOnly = true),
             ),
@@ -11344,7 +11404,7 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Text(
+            child: LocalizedText(
                 '${items.length} courrier${items.length > 1 ? 's' : ''} trouvé${items.length > 1 ? 's' : ''}'),
           ),
         ),
@@ -11355,7 +11415,7 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
                   ? const Center(
                       child: Padding(
                       padding: EdgeInsets.all(28),
-                      child: Text(
+                      child: LocalizedText(
                           'Aucun modèle trouvé. Essayez avec un mot plus simple, par exemple « résiliation », « facture » ou « logement ».',
                           textAlign: TextAlign.center),
                     ))
@@ -11372,17 +11432,20 @@ class _TemplateSearchScreenState extends State<TemplateSearchScreen> {
                             minVerticalPadding: 14,
                             leading:
                                 CircleAvatar(child: Icon(item.template.icon)),
-                            title: Text(item.model.title,
+                            title: LocalizedText(item.model.title,
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
-                            subtitle: Text(
+                            subtitle: LocalizedText(
                                 '${item.template.title} • ${item.model.subject}',
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis),
                             trailing: IconButton(
-                              tooltip: favorite
-                                  ? 'Retirer des favoris'
-                                  : 'Ajouter aux favoris',
+                              tooltip: uiText(
+                                context,
+                                favorite
+                                    ? 'Retirer des favoris'
+                                    : 'Ajouter aux favoris',
+                              ),
                               onPressed: () => _toggleFavorite(key),
                               icon: Icon(
                                   favorite ? Icons.star : Icons.star_border),
@@ -11414,13 +11477,13 @@ class LetterLibraryScreen extends StatelessWidget {
           child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text('Modèles de lettres',
+          LocalizedText('Modèles de lettres',
               style: Theme.of(context)
                   .textTheme
                   .headlineMedium
                   ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          Text(
+          LocalizedText(
               'Plus de ${500 + V173LetterCatalog.additionalRecords.length} modèles de lettres administratives'),
           const SizedBox(height: 20),
           ...LetterTemplate.values.map((template) => Padding(
@@ -11429,8 +11492,8 @@ class LetterLibraryScreen extends StatelessWidget {
                     child: ListTile(
                   minVerticalPadding: 18,
                   leading: CircleAvatar(child: Icon(template.icon)),
-                  title: Text(template.title),
-                  subtitle: const Text('10 modèles professionnels'),
+                  title: LocalizedText(template.title),
+                  subtitle: const LocalizedText('10 modèles professionnels'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) => LetterModelListScreen(
@@ -11449,7 +11512,7 @@ class LetterModelListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(template.title)),
+        appBar: AppBar(title: LocalizedText(template.title)),
         body: ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: template.models.length,
@@ -11459,10 +11522,10 @@ class LetterModelListScreen extends StatelessWidget {
             return Card(
                 child: ListTile(
               minVerticalPadding: 16,
-              leading: CircleAvatar(child: Text('${index + 1}')),
-              title: Text(model.title,
+              leading: CircleAvatar(child: LocalizedText('${index + 1}')),
+              title: LocalizedText(model.title,
                   style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(model.subject,
+              subtitle: LocalizedText(model.subject,
                   maxLines: 2, overflow: TextOverflow.ellipsis),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -11540,7 +11603,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
           if (!mounted) return;
           setState(() => _listeningDetails = false);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Microphone : ${error.errorMsg}')),
+            SnackBar(content: LocalizedText('Microphone : ${error.errorMsg}')),
           );
         },
       );
@@ -11576,7 +11639,8 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
       if (!_speechAvailable && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('La reconnaissance vocale n’est pas disponible.')),
+              content: LocalizedText(
+                  'La reconnaissance vocale n’est pas disponible.')),
         );
       }
       return;
@@ -11673,7 +11737,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(widget.model.title)),
+        appBar: AppBar(title: LocalizedText(widget.model.title)),
         body: Form(
             key: formKey,
             child: ListView(padding: const EdgeInsets.all(20), children: [
@@ -11684,16 +11748,16 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(widget.model.title,
+                            LocalizedText(widget.model.title,
                                 style: Theme.of(context)
                                     .textTheme
                                     .titleLarge
                                     ?.copyWith(fontWeight: FontWeight.bold)),
                             const SizedBox(height: 6),
-                            Text(widget.model.subject)
+                            LocalizedText(widget.model.subject)
                           ]))),
               const SizedBox(height: 18),
-              Text('Vos coordonnées',
+              LocalizedText('Vos coordonnées',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               Row(children: [
@@ -11702,7 +11766,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                         controller: firstName,
                         validator: requiredField,
                         decoration: InputDecoration(
-                            labelText: 'Prénom',
+                            labelText: uiText(context, 'Prénom'),
                             suffixIcon:
                                 VoiceInputButton(controller: firstName)))),
                 const SizedBox(width: 12),
@@ -11711,7 +11775,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                         controller: lastName,
                         validator: requiredField,
                         decoration: InputDecoration(
-                            labelText: 'Nom',
+                            labelText: uiText(context, 'Nom'),
                             suffixIcon:
                                 VoiceInputButton(controller: lastName)))),
               ]),
@@ -11720,7 +11784,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                   controller: address,
                   validator: requiredField,
                   decoration: InputDecoration(
-                      labelText: 'Adresse',
+                      labelText: uiText(context, 'Adresse'),
                       suffixIcon: VoiceInputButton(controller: address))),
               const SizedBox(height: 12),
               Row(children: [
@@ -11730,8 +11794,8 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                         controller: postalCode,
                         validator: requiredField,
                         keyboardType: TextInputType.number,
-                        decoration:
-                            const InputDecoration(labelText: 'Code postal'))),
+                        decoration: InputDecoration(
+                            labelText: uiText(context, 'Code postal')))),
                 const SizedBox(width: 12),
                 Expanded(
                     flex: 3,
@@ -11739,32 +11803,35 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                         controller: city,
                         validator: requiredField,
                         decoration: InputDecoration(
-                            labelText: 'Ville',
+                            labelText: uiText(context, 'Ville'),
                             suffixIcon: VoiceInputButton(controller: city)))),
               ]),
               const SizedBox(height: 22),
-              Text('Destinataire et demande',
+              LocalizedText('Destinataire et demande',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               TextFormField(
                   controller: recipient,
                   validator: requiredField,
                   decoration: InputDecoration(
-                      labelText: 'Organisme, entreprise ou employeur',
+                      labelText:
+                          uiText(context, 'Organisme, entreprise ou employeur'),
                       suffixIcon: VoiceInputButton(controller: recipient))),
               const SizedBox(height: 12),
               TextFormField(
                   controller: recipientAddress,
                   maxLines: 2,
                   decoration: InputDecoration(
-                      labelText: 'Adresse du destinataire (facultatif)',
+                      labelText: uiText(
+                          context, 'Adresse du destinataire (facultatif)'),
                       suffixIcon:
                           VoiceInputButton(controller: recipientAddress))),
               const SizedBox(height: 12),
               TextFormField(
                   controller: reference,
                   decoration: InputDecoration(
-                      labelText: 'Référence ou numéro de contrat',
+                      labelText:
+                          uiText(context, 'Référence ou numéro de contrat'),
                       suffixIcon: VoiceInputButton(controller: reference))),
               const SizedBox(height: 12),
               TextFormField(
@@ -11772,9 +11839,10 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                 minLines: 5,
                 maxLines: 10,
                 decoration: InputDecoration(
-                  labelText: 'Précisez votre demande',
+                  labelText: uiText(context, 'Précisez votre demande'),
                   alignLabelWithHint: true,
-                  hintText: 'Écrivez ou dictez les détails de votre demande.',
+                  hintText: uiText(context,
+                      'Écrivez ou dictez les détails de votre demande.'),
                   suffixIcon: VoiceInputButton(controller: details),
                 ),
               ),
@@ -11787,14 +11855,14 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                   icon: Icon(_listeningDetails ? Icons.stop_circle : Icons.mic),
                   label: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 13),
-                    child: Text(_listeningDetails
+                    child: LocalizedText(_listeningDetails
                         ? 'Arrêter la dictée'
                         : 'Dicter ma demande'),
                   ),
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
+              LocalizedText(
                 _listeningDetails
                     ? 'Je vous écoute… La dictée s’ajoute dans « Précisez votre demande ». '
                     : 'Le microphone remplit uniquement les détails de cette lettre.',
@@ -11812,7 +11880,7 @@ class _LetterFormScreenState extends State<LetterFormScreen> {
                   icon: const Icon(Icons.auto_awesome),
                   label: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Text('Générer la lettre'))),
+                      child: LocalizedText('Générer la lettre'))),
             ])),
       );
 }
@@ -11846,7 +11914,8 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
         !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(recipient)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Vérifiez l’adresse e-mail du destinataire.')),
+            content:
+                LocalizedText('Vérifiez l’adresse e-mail du destinataire.')),
       );
       return;
     }
@@ -11870,11 +11939,11 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Préparer l’e-mail')),
+        appBar: AppBar(title: const LocalizedText('Préparer l’e-mail')),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const Text(
+            const LocalizedText(
               'AdminFacile préparera le message et le PDF. Vous choisirez ensuite Gmail, Outlook ou une autre application pour vérifier et envoyer.',
             ),
             const SizedBox(height: 18),
@@ -11882,7 +11951,7 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
               controller: recipientController,
               keyboardType: TextInputType.emailAddress,
               decoration: InputDecoration(
-                labelText: 'Destinataire (facultatif)',
+                labelText: uiText(context, 'Destinataire (facultatif)'),
                 prefixIcon: const Icon(Icons.alternate_email),
                 suffixIcon: VoiceInputButton(controller: recipientController),
               ),
@@ -11891,7 +11960,7 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
             TextField(
               controller: subjectController,
               decoration: InputDecoration(
-                labelText: 'Objet',
+                labelText: uiText(context, 'Objet'),
                 prefixIcon: const Icon(Icons.subject),
                 suffixIcon: VoiceInputButton(controller: subjectController),
               ),
@@ -11902,7 +11971,7 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
               minLines: 7,
               maxLines: 12,
               decoration: InputDecoration(
-                labelText: 'Message',
+                labelText: uiText(context, 'Message'),
                 alignLabelWithHint: true,
                 suffixIcon: VoiceInputButton(controller: messageController),
               ),
@@ -11911,9 +11980,9 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
             Card(
               child: ListTile(
                 leading: const Icon(Icons.picture_as_pdf),
-                title: const Text('Lettre AdminFacile.pdf'),
-                subtitle:
-                    const Text('Le document sera ajouté en pièce jointe.'),
+                title: const LocalizedText('Lettre AdminFacile.pdf'),
+                subtitle: const LocalizedText(
+                    'Le document sera ajouté en pièce jointe.'),
               ),
             ),
             const SizedBox(height: 18),
@@ -11922,7 +11991,7 @@ class _EmailPreparationScreenState extends State<EmailPreparationScreen> {
               icon: const Icon(Icons.forward_to_inbox),
               label: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 14),
-                child: Text('Choisir Gmail ou Outlook'),
+                child: LocalizedText('Choisir Gmail ou Outlook'),
               ),
             ),
           ],
@@ -11971,10 +12040,11 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Améliorer avec Gemini'),
+          title: const LocalizedText('Améliorer avec Gemini'),
           content: DropdownButtonFormField<String>(
             initialValue: tone,
-            decoration: const InputDecoration(labelText: 'Ton souhaité'),
+            decoration:
+                InputDecoration(labelText: uiText(context, 'Ton souhaité')),
             items: const [
               'Courtois',
               'Professionnel',
@@ -11983,7 +12053,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
               'Plus détaillé'
             ]
                 .map((value) =>
-                    DropdownMenuItem(value: value, child: Text(value)))
+                    DropdownMenuItem(value: value, child: LocalizedText(value)))
                 .toList(),
             onChanged: (value) {
               if (value != null) setDialogState(() => tone = value);
@@ -11992,10 +12062,10 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Annuler')),
+                child: const LocalizedText('Annuler')),
             FilledButton(
                 onPressed: () => Navigator.pop(context, tone),
-                child: const Text('Améliorer')),
+                child: const LocalizedText('Améliorer')),
           ],
         ),
       ),
@@ -12010,17 +12080,17 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
       controller.selection =
           TextSelection.collapsed(offset: controller.text.length);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Lettre améliorée avec Gemini. Relisez-la avant l’envoi.')));
+          content: LocalizedText(
+              'Lettre améliorée avec Gemini. Relisez-la avant l’envoi.')));
     } on GeminiConfigurationException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(geminiUnavailableMessage)));
+            const SnackBar(content: LocalizedText(geminiUnavailableMessage)));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(geminiUnavailableMessage)));
+            const SnackBar(content: LocalizedText(geminiUnavailableMessage)));
       }
     } finally {
       if (mounted) setState(() => improving = false);
@@ -12061,7 +12131,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
     );
     if (!mounted || output == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document enregistré en PDF.')));
+        const SnackBar(content: LocalizedText('Document enregistré en PDF.')));
   }
 
   Future<void> _email() async {
@@ -12089,7 +12159,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Impossible d’ouvrir le site de La Poste.')),
+            content: LocalizedText('Impossible d’ouvrir le site de La Poste.')),
       );
     }
   }
@@ -12103,15 +12173,15 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Lettre générée'),
+          title: const LocalizedText('Lettre générée'),
           actions: [
             IconButton(
-              tooltip: 'Enregistrer en PDF',
+              tooltip: uiText(context, 'Enregistrer en PDF'),
               onPressed: _savePdf,
               icon: const Icon(Icons.save_alt_outlined),
             ),
             IconButton(
-              tooltip: 'Imprimer',
+              tooltip: uiText(context, 'Imprimer'),
               onPressed: _print,
               icon: const Icon(Icons.print_outlined),
             ),
@@ -12135,8 +12205,8 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                     fontSize: 15,
                     height: 1.6,
                   ),
-                  decoration: const InputDecoration(
-                    hintText: 'Document modifiable',
+                  decoration: InputDecoration(
+                    hintText: uiText(context, 'Document modifiable'),
                     hintStyle: TextStyle(color: Colors.black54),
                   ),
                 ),
@@ -12183,7 +12253,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.auto_awesome_rounded),
-                      label: Text(improving
+                      label: LocalizedText(improving
                           ? 'Amélioration en cours…'
                           : 'Améliorer cette lettre avec Gemini'),
                     ),
@@ -12195,7 +12265,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                         child: FilledButton.icon(
                           onPressed: _savePdf,
                           icon: const Icon(Icons.picture_as_pdf_outlined),
-                          label: const Text('Enregistrer'),
+                          label: const LocalizedText('Enregistrer'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -12203,7 +12273,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                         child: FilledButton.icon(
                           onPressed: _email,
                           icon: const Icon(Icons.email_outlined),
-                          label: const Text('Envoyer'),
+                          label: const LocalizedText('Envoyer'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -12211,7 +12281,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                         child: FilledButton.icon(
                           onPressed: _print,
                           icon: const Icon(Icons.print_outlined),
-                          label: const Text('Imprimer'),
+                          label: const LocalizedText('Imprimer'),
                         ),
                       ),
                     ],
@@ -12222,7 +12292,7 @@ class _LetterPreviewScreenState extends State<LetterPreviewScreen> {
                     child: OutlinedButton.icon(
                       onPressed: _openLaPoste,
                       icon: const Icon(Icons.local_post_office_outlined),
-                      label: const Text('Envoyer par La Poste'),
+                      label: const LocalizedText('Envoyer par La Poste'),
                     ),
                   ),
                 ],
@@ -12334,7 +12404,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Supabase n’est pas configuré dans cette version.'),
+          content:
+              LocalizedText('Supabase n’est pas configuré dans cette version.'),
         ),
       );
       return;
@@ -12347,7 +12418,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
+          content: LocalizedText(
             'Connectez-vous dans Profil avant de sauvegarder cette démarche.',
           ),
         ),
@@ -12393,7 +12464,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
+          content: LocalizedText(
             '« ${item.title} » est sauvegardée dans votre espace sécurisé.',
           ),
         ),
@@ -12416,7 +12487,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(cloudOperationMessage(error))),
+        SnackBar(content: LocalizedText(cloudOperationMessage(error))),
       );
     } finally {
       if (mounted) {
@@ -12434,7 +12505,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Modifier la démarche'),
+          title: const LocalizedText('Modifier la démarche'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -12442,12 +12513,13 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
               children: [
                 DropdownButtonFormField<ProcedureStatus>(
                   initialValue: selectedStatus,
-                  decoration: const InputDecoration(labelText: 'Statut'),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Statut')),
                   items: ProcedureStatus.values
                       .map(
                         (status) => DropdownMenuItem(
                           value: status,
-                          child: Text(status.label),
+                          child: LocalizedText(status.label),
                         ),
                       )
                       .toList(),
@@ -12463,7 +12535,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                   minLines: 3,
                   maxLines: 6,
                   decoration: InputDecoration(
-                    labelText: 'Notes personnelles',
+                    labelText: uiText(context, 'Notes personnelles'),
                     alignLabelWithHint: true,
                     suffixIcon: VoiceInputButton(controller: notes),
                   ),
@@ -12472,14 +12544,14 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.event_repeat),
-                  title: const Text('Date de relance'),
-                  subtitle: Text(
+                  title: const LocalizedText('Date de relance'),
+                  subtitle: LocalizedText(
                     reminderDate == null ? 'Aucune date' : _date(reminderDate!),
                   ),
                   trailing: reminderDate == null
                       ? null
                       : IconButton(
-                          tooltip: 'Supprimer la date',
+                          tooltip: uiText(context, 'Supprimer la date'),
                           onPressed: () {
                             setDialogState(() => reminderDate = null);
                           },
@@ -12507,7 +12579,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Annuler'),
+              child: const LocalizedText('Annuler'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(
@@ -12519,7 +12591,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                   clearReminder: reminderDate == null,
                 ),
               ),
-              child: const Text('Enregistrer'),
+              child: const LocalizedText('Enregistrer'),
             ),
           ],
         ),
@@ -12537,16 +12609,17 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Supprimer cette démarche ?'),
-        content: Text('« ${item.title} » sera supprimée définitivement.'),
+        title: const LocalizedText('Supprimer cette démarche ?'),
+        content:
+            LocalizedText('« ${item.title} » sera supprimée définitivement.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Annuler'),
+            child: const LocalizedText('Annuler'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Supprimer'),
+            child: const LocalizedText('Supprimer'),
           ),
         ],
       ),
@@ -12560,10 +12633,10 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Mes démarches'),
+          title: const LocalizedText('Mes démarches'),
           actions: [
             IconButton(
-              tooltip: 'Actualiser le cloud',
+              tooltip: uiText(context, 'Actualiser le cloud'),
               onPressed: _loadCloudState,
               icon: const Icon(Icons.cloud_sync_outlined),
             ),
@@ -12588,8 +12661,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 TextField(
-                  decoration: const InputDecoration(
-                    hintText: 'Rechercher une démarche',
+                  decoration: InputDecoration(
+                    hintText: uiText(context, 'Rechercher une démarche'),
                     prefixIcon: Icon(Icons.search),
                   ),
                   onChanged: (value) => setState(() => query = value),
@@ -12599,12 +12672,12 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                   segments: const [
                     ButtonSegment(
                       value: false,
-                      label: Text('En cours'),
+                      label: LocalizedText('En cours'),
                       icon: Icon(Icons.folder_open),
                     ),
                     ButtonSegment(
                       value: true,
-                      label: Text('Archivées'),
+                      label: LocalizedText('Archivées'),
                       icon: Icon(Icons.archive_outlined),
                     ),
                   ],
@@ -12622,9 +12695,9 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                         children: [
                           Icon(Icons.assignment_outlined, size: 44),
                           SizedBox(height: 12),
-                          Text('Aucune démarche dans cette section.'),
+                          LocalizedText('Aucune démarche dans cette section.'),
                           SizedBox(height: 6),
-                          Text(
+                          LocalizedText(
                             'Une démarche est créée automatiquement lorsque vous générez une lettre.',
                           ),
                         ],
@@ -12645,7 +12718,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
+                                    LocalizedText(
                                       item.title,
                                       style: Theme.of(context)
                                           .textTheme
@@ -12663,7 +12736,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                             children: [
                               Chip(
                                 avatar: Icon(item.status.icon, size: 18),
-                                label: Text(item.status.label),
+                                label: LocalizedText(item.status.label),
                               ),
                             ],
                           ),
@@ -12691,7 +12764,8 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                   icon: const Icon(
                                     Icons.description_outlined,
                                   ),
-                                  label: const Text('Ouvrir la lettre'),
+                                  label:
+                                      const LocalizedText('Ouvrir la lettre'),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -12712,7 +12786,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     color: Theme.of(context).colorScheme.error),
                               PopupMenuButton<String>(
                                 key: Key('procedure-more-${item.id}'),
-                                tooltip: 'Plus d’actions',
+                                tooltip: uiText(context, 'Plus d’actions'),
                                 icon: const Icon(Icons.more_horiz_rounded),
                                 onSelected: (value) async {
                                   if (value == 'edit') {
@@ -12737,7 +12811,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     value: 'edit',
                                     child: ListTile(
                                       leading: Icon(Icons.edit_outlined),
-                                      title: Text('Modifier'),
+                                      title: LocalizedText('Modifier'),
                                       dense: true,
                                     ),
                                   ),
@@ -12748,7 +12822,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     child: const ListTile(
                                       leading:
                                           Icon(Icons.cloud_upload_outlined),
-                                      title: Text('Cloud'),
+                                      title: LocalizedText('Cloud'),
                                       dense: true,
                                     ),
                                   ),
@@ -12756,7 +12830,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     value: 'download',
                                     child: ListTile(
                                       leading: Icon(Icons.download_rounded),
-                                      title: Text('Télécharger'),
+                                      title: LocalizedText('Télécharger'),
                                       dense: true,
                                     ),
                                   ),
@@ -12764,7 +12838,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     value: 'share',
                                     child: ListTile(
                                       leading: Icon(Icons.share_outlined),
-                                      title: Text('Partager'),
+                                      title: LocalizedText('Partager'),
                                       dense: true,
                                     ),
                                   ),
@@ -12773,7 +12847,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     value: 'advancedPrint',
                                     child: ListTile(
                                       leading: Icon(Icons.print_outlined),
-                                      title: Text('Imprimer'),
+                                      title: LocalizedText('Imprimer'),
                                       dense: true,
                                     ),
                                   ),
@@ -12783,7 +12857,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                       leading: Icon(item.archived
                                           ? Icons.unarchive_outlined
                                           : Icons.archive_outlined),
-                                      title: Text(item.archived
+                                      title: LocalizedText(item.archived
                                           ? 'Désarchiver'
                                           : 'Archiver'),
                                       dense: true,
@@ -12794,7 +12868,7 @@ class _ProceduresScreenState extends State<ProceduresScreen> {
                                     value: 'delete',
                                     child: ListTile(
                                       leading: Icon(Icons.delete_outline),
-                                      title: Text('Supprimer'),
+                                      title: LocalizedText('Supprimer'),
                                       dense: true,
                                     ),
                                   ),
@@ -12893,7 +12967,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (doc.filePath == null || !File(doc.filePath!).existsSync()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
+          content: LocalizedText(
               'Le fichier PDF n’est plus disponible, mais le texte archivé reste accessible.')));
       return;
     }
@@ -12918,8 +12992,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (user == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            const Text('Connectez-vous dans Profil pour utiliser le cloud.'),
+        content: const LocalizedText(
+            'Connectez-vous dans Profil pour utiliser le cloud.'),
         action: SnackBarAction(
           label: 'Ouvrir le Profil',
           onPressed: () => Navigator.of(context).push(MaterialPageRoute(
@@ -12985,7 +13059,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ));
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(cloudOperationMessage(error))),
+          SnackBar(content: LocalizedText(cloudOperationMessage(error))),
         );
       }
     } finally {
@@ -13027,16 +13101,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Supprimer ce document ?'),
-        content: Text('« ${doc.title} » sera supprimé définitivement.'),
+        title: const LocalizedText('Supprimer ce document ?'),
+        content:
+            LocalizedText('« ${doc.title} » sera supprimé définitivement.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Annuler'),
+            child: const LocalizedText('Annuler'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Supprimer'),
+            child: const LocalizedText('Supprimer'),
           ),
         ],
       ),
@@ -13068,7 +13143,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Modifier le document'),
+          title: const LocalizedText('Modifier le document'),
           content: SizedBox(
             width: 520,
             child: SingleChildScrollView(
@@ -13076,7 +13151,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 TextField(
                     controller: title,
                     decoration: InputDecoration(
-                        labelText: 'Titre',
+                        labelText: uiText(context, 'Titre'),
                         suffixIcon: VoiceInputButton(controller: title))),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -13084,9 +13159,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           .contains(selectedDocumentType)
                       ? selectedDocumentType
                       : 'Document inconnu',
-                  decoration: const InputDecoration(labelText: 'Type détecté'),
+                  decoration: InputDecoration(
+                      labelText: uiText(context, 'Type détecté')),
                   items: SmartDocumentLocalAnalyzer.documentTypes
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                          DropdownMenuItem(value: e, child: LocalizedText(e)))
                       .toList(),
                   onChanged: (v) => setDialogState(
                       () => selectedDocumentType = v ?? 'Document inconnu'),
@@ -13094,17 +13171,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const SizedBox(height: 12),
                 TextField(
                     controller: amount,
-                    decoration:
-                        const InputDecoration(labelText: 'Montant total')),
+                    decoration: InputDecoration(
+                        labelText: uiText(context, 'Montant total'))),
                 const SizedBox(height: 12),
                 TextField(
                     controller: dueDate,
-                    decoration:
-                        const InputDecoration(labelText: 'Date limite')),
+                    decoration: InputDecoration(
+                        labelText: uiText(context, 'Date limite'))),
                 const SizedBox(height: 12),
                 TextField(
                     controller: reference,
-                    decoration: const InputDecoration(labelText: 'Référence')),
+                    decoration: InputDecoration(
+                        labelText: uiText(context, 'Référence'))),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: const [
@@ -13114,14 +13192,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ].contains(selectedDetectedPriority)
                       ? selectedDetectedPriority
                       : 'À vérifier',
-                  decoration:
-                      const InputDecoration(labelText: 'Priorité détectée'),
+                  decoration: InputDecoration(
+                      labelText: uiText(context, 'Priorité détectée')),
                   items: const [
                     'Aucune action urgente détectée',
                     'À vérifier',
                     'Échéance ou réponse proche'
                   ]
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                          DropdownMenuItem(value: e, child: LocalizedText(e)))
                       .toList(),
                   onChanged: (v) => setDialogState(
                       () => selectedDetectedPriority = v ?? 'À vérifier'),
@@ -13130,7 +13209,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 TextField(
                     controller: organisation,
                     decoration: InputDecoration(
-                        labelText: 'Organisme',
+                        labelText: uiText(context, 'Organisme'),
                         suffixIcon:
                             VoiceInputButton(controller: organisation))),
                 const SizedBox(height: 12),
@@ -13138,9 +13217,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   initialValue: categories.contains(selectedCategory)
                       ? selectedCategory
                       : 'Autre',
-                  decoration: const InputDecoration(labelText: 'Catégorie'),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Catégorie')),
                   items: categories
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                          DropdownMenuItem(value: e, child: LocalizedText(e)))
                       .toList(),
                   onChanged: (v) =>
                       setDialogState(() => selectedCategory = v ?? 'Autre'),
@@ -13148,9 +13229,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: selectedStatus,
-                  decoration: const InputDecoration(labelText: 'Statut'),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Statut')),
                   items: statuses
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                          DropdownMenuItem(value: e, child: LocalizedText(e)))
                       .toList(),
                   onChanged: (v) =>
                       setDialogState(() => selectedStatus = v ?? 'À traiter'),
@@ -13158,9 +13241,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: selectedPriority,
-                  decoration: const InputDecoration(labelText: 'Priorité'),
+                  decoration:
+                      InputDecoration(labelText: uiText(context, 'Priorité')),
                   items: priorities
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) =>
+                          DropdownMenuItem(value: e, child: LocalizedText(e)))
                       .toList(),
                   onChanged: (v) => setDialogState(
                       () => selectedPriority = v ?? 'Information'),
@@ -13171,7 +13256,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     minLines: 3,
                     maxLines: 5,
                     decoration: InputDecoration(
-                        labelText: 'Notes personnelles',
+                        labelText: uiText(context, 'Notes personnelles'),
                         alignLabelWithHint: true,
                         suffixIcon: VoiceInputButton(controller: notes))),
               ]),
@@ -13180,10 +13265,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Annuler')),
+                child: const LocalizedText('Annuler')),
             FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Enregistrer')),
+                child: const LocalizedText('Enregistrer')),
           ],
         ),
       ),
@@ -13228,39 +13313,39 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           controller: controller,
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
           children: [
-            Text(doc.title,
+            LocalizedText(doc.title,
                 style: Theme.of(context)
                     .textTheme
                     .headlineSmall
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('${doc.organisation} • ${doc.category}'),
+            LocalizedText('${doc.organisation} • ${doc.category}'),
             const SizedBox(height: 14),
             Wrap(spacing: 8, runSpacing: 8, children: [
               Chip(
                   avatar: Icon(_priorityIcon(doc.priority), size: 18),
-                  label: Text(doc.priority)),
+                  label: LocalizedText(doc.priority)),
               Chip(
                   avatar: const Icon(Icons.flag_outlined, size: 18),
-                  label: Text(doc.status)),
+                  label: LocalizedText(doc.status)),
               if (doc.deadline != null)
                 Chip(
                     avatar: const Icon(Icons.event, size: 18),
-                    label: Text(doc.deadline!)),
+                    label: LocalizedText(doc.deadline!)),
             ]),
             if (doc.notes.isNotEmpty) ...[
               const SizedBox(height: 14),
-              const Text('Notes',
+              const LocalizedText('Notes',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
-              Text(doc.notes),
+              LocalizedText(doc.notes),
             ],
             const SizedBox(height: 14),
-            const Text('Texte reconnu',
+            const LocalizedText('Texte reconnu',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             SelectableText(doc.extractedText.isEmpty
-                ? 'Aucun texte OCR enregistré.'
+                ? uiText(context, 'Aucun texte OCR enregistré.')
                 : doc.extractedText),
           ],
         ),
@@ -13289,13 +13374,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             return ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                Text('Coffre-fort documentaire',
+                LocalizedText('Coffre-fort documentaire',
                     style: Theme.of(context)
                         .textTheme
                         .headlineMedium
                         ?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                const Text(
+                const LocalizedText(
                     'Classez, retrouvez et suivez tous vos documents administratifs au même endroit.'),
                 const SizedBox(height: 16),
                 Row(children: [
@@ -13323,7 +13408,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     prefixIcon: const Icon(Icons.search),
-                    labelText: 'Rechercher dans le titre, l’OCR ou les notes',
+                    labelText: uiText(context,
+                        'Rechercher dans le titre, l’OCR ou les notes'),
                     suffixIcon: searchController.text.isEmpty
                         ? null
                         : IconButton(
@@ -13341,23 +13427,23 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     segments: const [
                       ButtonSegment(
                           value: 'Tous',
-                          label: Text('Tous'),
+                          label: LocalizedText('Tous'),
                           icon: Icon(Icons.folder_outlined)),
                       ButtonSegment(
                           value: 'Favoris',
-                          label: Text('Favoris'),
+                          label: LocalizedText('Favoris'),
                           icon: Icon(Icons.star_outline)),
                       ButtonSegment(
                           value: 'Urgents',
-                          label: Text('Urgents'),
+                          label: LocalizedText('Urgents'),
                           icon: Icon(Icons.error_outline)),
                       ButtonSegment(
                           value: 'À traiter',
-                          label: Text('À traiter'),
+                          label: LocalizedText('À traiter'),
                           icon: Icon(Icons.pending_actions_outlined)),
                       ButtonSegment(
                           value: 'Archivés',
-                          label: Text('Archivés'),
+                          label: LocalizedText('Archivés'),
                           icon: Icon(Icons.archive_outlined)),
                     ],
                     selected: {quickFilter},
@@ -13373,10 +13459,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     DropdownButtonFormField<String>(
                       isExpanded: true,
                       initialValue: category,
-                      decoration: const InputDecoration(labelText: 'Catégorie'),
+                      decoration: InputDecoration(
+                          labelText: uiText(context, 'Catégorie')),
                       items: categories
-                          .map(
-                              (e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .map((e) => DropdownMenuItem(
+                              value: e, child: LocalizedText(e)))
                           .toList(),
                       onChanged: (value) =>
                           setState(() => category = value ?? 'Tous'),
@@ -13384,15 +13471,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     DropdownButtonFormField<String>(
                       isExpanded: true,
                       initialValue: sortMode,
-                      decoration: const InputDecoration(labelText: 'Trier par'),
+                      decoration: InputDecoration(
+                          labelText: uiText(context, 'Trier par')),
                       items: const [
                         'Plus récents',
                         'Plus anciens',
                         'Organisme',
                         'Priorité'
                       ]
-                          .map(
-                              (e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .map((e) => DropdownMenuItem(
+                              value: e, child: LocalizedText(e)))
                           .toList(),
                       onChanged: (value) =>
                           setState(() => sortMode = value ?? 'Plus récents'),
@@ -13419,7 +13507,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           child: Column(children: [
                             Icon(Icons.folder_open, size: 52),
                             SizedBox(height: 12),
-                            Text(
+                            LocalizedText(
                                 'Aucun document ne correspond aux filtres sélectionnés.',
                                 textAlign: TextAlign.center)
                           ])))
@@ -13442,12 +13530,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.start,
                                                 children: [
-                                              Text(doc.title,
+                                              LocalizedText(doc.title,
                                                   style: const TextStyle(
                                                       fontWeight:
                                                           FontWeight.bold,
                                                       fontSize: 16)),
-                                              Text(
+                                              LocalizedText(
                                                   '${doc.createdAt.day.toString().padLeft(2, '0')}/${doc.createdAt.month.toString().padLeft(2, '0')}/${doc.createdAt.year}'),
                                             ])),
                                       ]),
@@ -13465,9 +13553,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                         icon: Icon(doc.filePath == null
                                             ? Icons.open_in_new_rounded
                                             : Icons.visibility_outlined),
-                                        label: Text(doc.filePath == null
-                                            ? 'Ouvrir'
-                                            : 'Aperçu'),
+                                        label: LocalizedText(
+                                            doc.filePath == null
+                                                ? 'Ouvrir'
+                                                : 'Aperçu'),
                                       ),
                                     ),
                                     const Spacer(),
@@ -13496,7 +13585,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           size: 22),
                                     PopupMenuButton<String>(
                                       key: Key('document-more-${doc.id}'),
-                                      tooltip: 'Plus d’actions',
+                                      tooltip:
+                                          uiText(context, 'Plus d’actions'),
                                       icon:
                                           const Icon(Icons.more_horiz_rounded),
                                       onSelected: (value) {
@@ -13523,7 +13613,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           child: const ListTile(
                                             leading: Icon(
                                                 Icons.cloud_upload_outlined),
-                                            title: Text('Cloud / Synchroniser'),
+                                            title: LocalizedText(
+                                                'Cloud / Synchroniser'),
                                             dense: true,
                                           ),
                                         ),
@@ -13532,7 +13623,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           enabled: doc.filePath != null,
                                           child: const ListTile(
                                             leading: Icon(Icons.share_outlined),
-                                            title: Text('Partager'),
+                                            title: LocalizedText('Partager'),
                                             dense: true,
                                           ),
                                         ),
@@ -13541,7 +13632,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           enabled: doc.filePath != null,
                                           child: const ListTile(
                                             leading: Icon(Icons.print_outlined),
-                                            title: Text('Imprimer'),
+                                            title: LocalizedText('Imprimer'),
                                             dense: true,
                                           ),
                                         ),
@@ -13550,7 +13641,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           value: 'advancedEdit',
                                           child: ListTile(
                                             leading: Icon(Icons.edit_outlined),
-                                            title: Text(
+                                            title: LocalizedText(
                                                 'Modifier les informations'),
                                             dense: true,
                                           ),
@@ -13561,7 +13652,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           child: const ListTile(
                                             leading:
                                                 Icon(Icons.download_rounded),
-                                            title: Text('Télécharger'),
+                                            title: LocalizedText('Télécharger'),
                                             dense: true,
                                           ),
                                         ),
@@ -13570,7 +13661,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           value: 'delete',
                                           child: ListTile(
                                             leading: Icon(Icons.delete_outline),
-                                            title: Text('Supprimer'),
+                                            title: LocalizedText('Supprimer'),
                                             dense: true,
                                           ),
                                         ),
@@ -13603,10 +13694,10 @@ class _DocumentStatCard extends StatelessWidget {
           child: Column(children: [
             Icon(icon, size: 22, color: Theme.of(context).colorScheme.primary),
             const SizedBox(height: 4),
-            Text(value,
+            LocalizedText(value,
                 style:
                     const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
-            Text(label,
+            LocalizedText(label,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall),
           ]),
@@ -13697,7 +13788,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(remoteWarning ?? 'Profil enregistré')),
+      SnackBar(content: LocalizedText(remoteWarning ?? 'Profil enregistré')),
     );
   }
 
@@ -13779,13 +13870,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {});
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Vous êtes déconnecté.')),
+      const SnackBar(content: LocalizedText('Vous êtes déconnecté.')),
     );
   }
 
   void _showAuthMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(content: LocalizedText(message)),
     );
   }
 
@@ -13816,20 +13907,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Changer le mot de passe'),
+          title: const LocalizedText('Changer le mot de passe'),
           content: TextField(
             key: const Key('auth-new-password'),
             controller: controller,
             obscureText: !passwordVisible,
             autofocus: true,
             decoration: InputDecoration(
-              labelText: 'Nouveau mot de passe',
-              helperText: '6 caractères minimum',
+              labelText: uiText(context, 'Nouveau mot de passe'),
+              helperText: uiText(context, '6 caractères minimum'),
               suffixIcon: IconButton(
                 key: const Key('auth-new-password-visibility'),
-                tooltip: passwordVisible
-                    ? 'Masquer le mot de passe'
-                    : 'Afficher le mot de passe',
+                tooltip: uiText(
+                  context,
+                  passwordVisible
+                      ? 'Masquer le mot de passe'
+                      : 'Afficher le mot de passe',
+                ),
                 icon: Icon(
                     passwordVisible ? Icons.visibility_off : Icons.visibility),
                 onPressed: () =>
@@ -13840,11 +13934,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Annuler'),
+              child: const LocalizedText('Annuler'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, controller.text),
-              child: const Text('Mettre à jour'),
+              child: const LocalizedText('Mettre à jour'),
             ),
           ],
         ),
@@ -13872,7 +13966,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (result.remoteError != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
+          content: LocalizedText(
             'Signature enregistrée sur ce téléphone. '
             '${cloudOperationMessage(result.remoteError!)}',
           ),
@@ -13892,7 +13986,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Signature non enregistrée : $error')),
+          SnackBar(
+              content: LocalizedText('Signature non enregistrée : $error')),
         );
       }
     }
@@ -13909,7 +14004,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final extension = picked.extension?.toLowerCase();
     if (!const {'png', 'jpg', 'jpeg'}.contains(extension)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Choisissez une image PNG, JPG ou JPEG.'),
+        content: LocalizedText('Choisissez une image PNG, JPG ou JPEG.'),
       ));
       return;
     }
@@ -13921,7 +14016,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import impossible : $error')),
+          SnackBar(content: LocalizedText('Import impossible : $error')),
         );
       }
     }
@@ -13932,7 +14027,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (result.remoteError != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
+          content: LocalizedText(
             'Signature supprimée de ce téléphone. '
             'La suppression cloud sera à réessayer avec une connexion active.',
           ),
@@ -13950,7 +14045,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(
+          LocalizedText(
             'Mon profil',
             style: Theme.of(context)
                 .textTheme
@@ -13958,7 +14053,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Text(
+          const LocalizedText(
             'Ces informations seront automatiquement reprises dans vos lettres.',
           ),
           const SizedBox(height: 18),
@@ -13980,7 +14075,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
+                        child: LocalizedText(
                           user == null
                               ? 'Compte et espace sécurisé'
                               : 'Compte connecté',
@@ -13994,31 +14089,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 10),
                   if (user != null) ...[
-                    Text(user.email ?? 'Compte connecté'),
+                    LocalizedText(user.email ?? 'Compte connecté'),
                     const SizedBox(height: 12),
                     FilledButton.tonalIcon(
                       onPressed: _authBusy ? null : _signOut,
                       icon: const Icon(Icons.logout_rounded),
-                      label: const Text('Se déconnecter'),
+                      label: const LocalizedText('Se déconnecter'),
                     ),
                     const SizedBox(height: 8),
                     TextButton.icon(
                       key: const Key('auth-change-password'),
                       onPressed: _authBusy ? null : _changePassword,
                       icon: const Icon(Icons.password_rounded),
-                      label: const Text('Changer le mot de passe'),
+                      label: const LocalizedText('Changer le mot de passe'),
                     ),
                   ] else ...[
                     SegmentedButton<bool>(
                       segments: const [
                         ButtonSegment(
                           value: false,
-                          label: Text('Connexion'),
+                          label: LocalizedText('Connexion'),
                           icon: Icon(Icons.login_rounded),
                         ),
                         ButtonSegment(
                           value: true,
-                          label: Text('Créer un compte'),
+                          label: LocalizedText('Créer un compte'),
                           icon: Icon(Icons.person_add_alt_1_rounded),
                         ),
                       ],
@@ -14034,8 +14129,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     TextField(
                       controller: _accountEmailController,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'Adresse e-mail du compte',
+                      decoration: InputDecoration(
+                        labelText: uiText(context, 'Adresse e-mail du compte'),
                         prefixIcon: Icon(Icons.email_outlined),
                       ),
                     ),
@@ -14045,13 +14140,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       controller: _accountPasswordController,
                       obscureText: !_accountPasswordVisible,
                       decoration: InputDecoration(
-                        labelText: 'Mot de passe',
+                        labelText: uiText(context, 'Mot de passe'),
                         prefixIcon: const Icon(Icons.lock_outline_rounded),
                         suffixIcon: IconButton(
                           key: const Key('profile-auth-password-visibility'),
-                          tooltip: _accountPasswordVisible
-                              ? 'Masquer le mot de passe'
-                              : 'Afficher le mot de passe',
+                          tooltip: uiText(
+                            context,
+                            _accountPasswordVisible
+                                ? 'Masquer le mot de passe'
+                                : 'Afficher le mot de passe',
+                          ),
                           icon: Icon(_accountPasswordVisible
                               ? Icons.visibility_off
                               : Icons.visibility),
@@ -14077,7 +14175,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   ? Icons.person_add_alt_1_rounded
                                   : Icons.login_rounded,
                             ),
-                      label: Text(
+                      label: LocalizedText(
                         _createAccountMode
                             ? 'Créer mon compte'
                             : 'Se connecter',
@@ -14088,7 +14186,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       TextButton(
                         key: const Key('auth-reset-password'),
                         onPressed: _authBusy ? null : _resetPassword,
-                        child: const Text('Mot de passe oublié ?'),
+                        child: const LocalizedText('Mot de passe oublié ?'),
                       ),
                     ],
                   ],
@@ -14107,7 +14205,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const Row(children: [
                     Icon(Icons.draw_outlined),
                     SizedBox(width: 10),
-                    Text('Ma signature',
+                    LocalizedText('Ma signature',
                         style: TextStyle(
                             fontSize: 18, fontWeight: FontWeight.w800)),
                   ]),
@@ -14132,7 +14230,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Icon(Icons.check_circle_outline,
                             size: 18, color: Colors.green),
                         SizedBox(width: 6),
-                        Text('Fond transparent'),
+                        LocalizedText('Fond transparent'),
                       ],
                     ),
                     SwitchListTile(
@@ -14140,30 +14238,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       contentPadding: EdgeInsets.zero,
                       value: widget.settings.autoInsertSignature,
                       onChanged: widget.settings.setAutoInsertSignature,
-                      title: const Text(
+                      title: const LocalizedText(
                           'Insérer automatiquement ma signature dans les lettres'),
                     ),
                   ] else
-                    const Text('Aucune signature enregistrée.'),
+                    const LocalizedText('Aucune signature enregistrée.'),
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 8, children: [
                     FilledButton.tonalIcon(
                       key: const Key('draw-signature'),
                       onPressed: _drawSignature,
                       icon: const Icon(Icons.gesture_rounded),
-                      label: const Text('Dessiner ma signature'),
+                      label: const LocalizedText('Dessiner ma signature'),
                     ),
                     OutlinedButton.icon(
                       key: const Key('import-signature'),
                       onPressed: _importSignature,
                       icon: const Icon(Icons.image_outlined),
-                      label: const Text('Importer une image'),
+                      label: const LocalizedText('Importer une image'),
                     ),
                     if (widget.settings.hasSignature)
                       TextButton.icon(
                         onPressed: _removeSignature,
                         icon: const Icon(Icons.delete_outline),
-                        label: const Text('Supprimer'),
+                        label: const LocalizedText('Supprimer'),
                       ),
                   ]),
                 ],
@@ -14184,7 +14282,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                       const SizedBox(width: 10),
-                      const Text(
+                      const LocalizedText(
                         'Apparence',
                         style: TextStyle(
                           fontSize: 18,
@@ -14194,24 +14292,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text('Choisissez le thème de l’application.'),
+                  const LocalizedText('Choisissez le thème de l’application.'),
                   const SizedBox(height: 14),
                   SegmentedButton<AppThemePreference>(
                     segments: const [
                       ButtonSegment(
                         value: AppThemePreference.system,
                         icon: Icon(Icons.phone_android),
-                        label: Text('Auto'),
+                        label: LocalizedText('Auto'),
                       ),
                       ButtonSegment(
                         value: AppThemePreference.light,
                         icon: Icon(Icons.light_mode_outlined),
-                        label: Text('Clair'),
+                        label: LocalizedText('Clair'),
                       ),
                       ButtonSegment(
                         value: AppThemePreference.dark,
                         icon: Icon(Icons.dark_mode_outlined),
-                        label: Text('Sombre'),
+                        label: LocalizedText('Sombre'),
                       ),
                     ],
                     selected: {widget.settings.themePreference},
@@ -14230,8 +14328,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             value: widget.settings.comfortMode,
             onChanged: widget.settings.setComfortMode,
             secondary: const Icon(Icons.text_increase),
-            title: const Text('Mode confort'),
-            subtitle: const Text(
+            title: const LocalizedText('Mode confort'),
+            subtitle: const LocalizedText(
               'Texte plus grand et navigation plus lisible',
             ),
           ),
@@ -14239,7 +14337,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextField(
             controller: fields['firstName'],
             decoration: InputDecoration(
-              labelText: 'Prénom',
+              labelText: uiText(context, 'Prénom'),
               suffixIcon: VoiceInputButton(
                 controller: fields['firstName']!,
               ),
@@ -14249,7 +14347,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextField(
             controller: fields['lastName'],
             decoration: InputDecoration(
-              labelText: 'Nom',
+              labelText: uiText(context, 'Nom'),
               suffixIcon: VoiceInputButton(
                 controller: fields['lastName']!,
               ),
@@ -14259,7 +14357,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextField(
             controller: fields['address'],
             decoration: InputDecoration(
-              labelText: 'Adresse',
+              labelText: uiText(context, 'Adresse'),
               suffixIcon: VoiceInputButton(
                 controller: fields['address']!,
               ),
@@ -14273,8 +14371,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: TextField(
                   controller: fields['postalCode'],
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Code postal',
+                  decoration: InputDecoration(
+                    labelText: uiText(context, 'Code postal'),
                   ),
                 ),
               ),
@@ -14284,7 +14382,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: TextField(
                   controller: fields['city'],
                   decoration: InputDecoration(
-                    labelText: 'Ville',
+                    labelText: uiText(context, 'Ville'),
                     suffixIcon: VoiceInputButton(
                       controller: fields['city']!,
                     ),
@@ -14297,13 +14395,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextField(
             controller: fields['phone'],
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(labelText: 'Téléphone'),
+            decoration:
+                InputDecoration(labelText: uiText(context, 'Téléphone')),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: fields['email'],
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: 'E-mail'),
+            decoration: InputDecoration(labelText: uiText(context, 'E-mail')),
           ),
           const SizedBox(height: 18),
           FilledButton.icon(
@@ -14311,7 +14410,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: const Icon(Icons.save_outlined),
             label: const Padding(
               padding: EdgeInsets.symmetric(vertical: 14),
-              child: Text('Enregistrer mon profil'),
+              child: LocalizedText('Enregistrer mon profil'),
             ),
           ),
           const SizedBox(height: 20),

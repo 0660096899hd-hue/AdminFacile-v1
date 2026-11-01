@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'document_translation_service.dart';
+import 'l10n/ui_localization.dart';
 
 class DocumentTranslationScreen extends StatefulWidget {
   const DocumentTranslationScreen({
@@ -121,14 +122,14 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
     await Clipboard.setData(ClipboardData(text: _translation));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Traduction copiée')),
+      const SnackBar(content: LocalizedText('Traduction copiée')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Traduire le document')),
+      appBar: AppBar(title: const LocalizedText('Traduire le document')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -137,18 +138,18 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
               DropdownButtonFormField<int>(
                 key: const Key('document-translation-page'),
                 initialValue: _selectedPage,
-                decoration: const InputDecoration(
-                  labelText: 'Partie à traduire',
+                decoration: InputDecoration(
+                  labelText: uiText(context, 'Partie à traduire'),
                 ),
                 items: [
                   const DropdownMenuItem(
                     value: -1,
-                    child: Text('Document complet'),
+                    child: LocalizedText('Document complet'),
                   ),
                   for (var index = 0; index < _pages.length; index++)
                     DropdownMenuItem(
                       value: index,
-                      child: Text('Page ${index + 1}'),
+                      child: LocalizedText('Page ${index + 1}'),
                     ),
                 ],
                 onChanged: _translating
@@ -172,8 +173,8 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
                     ),
                     initialValue: _source,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Langue du document',
+                    decoration: InputDecoration(
+                      labelText: uiText(context, 'Langue du document'),
                     ),
                     items: _languageItems(),
                     onChanged: _translating ? null : _selectSource,
@@ -184,8 +185,8 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
                     ),
                     initialValue: _target,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Traduire vers',
+                    decoration: InputDecoration(
+                      labelText: uiText(context, 'Traduire vers'),
                     ),
                     items: _languageItems(),
                     onChanged: _translating ? null : _selectTarget,
@@ -224,13 +225,14 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
                   : const Icon(Icons.translate_rounded),
               label: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Text(
+                child: LocalizedText(
                   _translating ? 'Traduction en cours…' : 'Traduire',
                 ),
               ),
             ),
             const SizedBox(height: 10),
-            Text(_status, key: const Key('document-translation-status')),
+            LocalizedText(_status,
+                key: const Key('document-translation-status')),
             const SizedBox(height: 18),
             _TranslationTextZone(
               title: 'Texte original',
@@ -250,7 +252,7 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
               key: const Key('document-translation-copy'),
               onPressed: _translation.isEmpty ? null : _copyTranslation,
               icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copier la traduction'),
+              label: const LocalizedText('Copier la traduction'),
             ),
           ],
         ),
@@ -263,7 +265,7 @@ class _DocumentTranslationScreenState extends State<DocumentTranslationScreen> {
           .map(
             (language) => DropdownMenuItem(
               value: language,
-              child: Text(language.label),
+              child: LocalizedText(language.label),
             ),
           )
           .toList(growable: false);
@@ -299,7 +301,7 @@ class _TranslationTextZone extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            LocalizedText(
               title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
